@@ -86,6 +86,33 @@ describe('maintainable web export', () => {
   });
 });
 describe('exported interactions', () => {
+  it('keeps keyboard navigation inside the sandbox preview protocol', async () => {
+    const bundle = exportWeb(demoProject()),
+      blobs: Blob[] = [];
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      if (!(blob instanceof Blob)) throw new Error('Expected Blob');
+      blobs.push(blob);
+      return 'blob:test/' + blobs.length;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const preview = createPreview(bundle, 'demo-board');
+    const scripts = await Promise.all(
+      blobs.filter((b) => b.type === 'text/javascript').map((b) => b.text())
+    );
+    const bridge = scripts.find((s) => s.includes('navigatePreview'))!;
+    document.body.innerHTML =
+      '<div id="nav" data-action="navigate" data-page="next.html" tabindex="0"></div>';
+    const postMessage = vi.fn();
+    new Function('document', 'parent', bridge)(document, { postMessage });
+    document
+      .getElementById('nav')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: 'xd-preview-navigate', page: 'next.html' },
+      '*'
+    );
+    preview.dispose();
+  });
   it('toggles hidden targets by click and keyboard, preserves matrix transforms', () => {
     document.body.innerHTML =
       '<div id="trigger" tabindex="0" data-action="toggle" data-target="panel"></div><section id="panel" hidden></section>';

@@ -18,6 +18,7 @@ import {
 import { renderBoard } from '../render/svg';
 import { demoProject } from '../demo';
 import { icon } from './icons';
+import { FontRegistry, readFont, usedFonts } from '../core/fonts';
 
 const kindLabel: Record<string, string> = {
   artboard: '畫板',
@@ -60,6 +61,7 @@ export class Studio {
   private collapsed = new Set<string>();
   private search = '';
   private history = new History();
+  private fontRegistry = new FontRegistry();
   private preview?: ReturnType<typeof createPreview>;
   private bundle?: WebBundle;
   private viewportWidth = 1200;
@@ -117,10 +119,19 @@ export class Studio {
       <div class="canvas-viewport" id="canvas-viewport"><div class="canvas-paper" id="canvas-paper"><div id="board-caption"></div><div id="design-stage"></div><svg id="selection-overlay" xmlns="http://www.w3.org/2000/svg"></svg></div></div><div id="preview-stage" hidden><iframe title="本機互動預覽" sandbox="allow-scripts" srcdoc=""></iframe></div><div class="canvas-bottom"><span id="canvas-status">Ctrl／⌘ 多選 · Alt 測距 · 空白鍵拖曳</span><div>${button('undo', '', 'undo', 'icon-button', 'aria-label="復原" title="Ctrl+Z"')}${button('redo', '', 'redo', 'icon-button', 'aria-label="重做" title="Ctrl+Shift+Z"')}<span class="divider"></span><span id="dimensions"></span></div></div></main>
       <aside class="right-panel panel"><div class="panel-tabs inspector-tabs"><button data-action="inspect" class="active">屬性</button><button data-action="interact">互動</button><button data-action="layout">排版</button></div><div id="inspector"></div></aside></div>
       <footer class="statusbar"><span>LOCAL FIRST <span class="status-separator">/</span> 無需 Adobe XD</span><button id="diagnostic-button" data-action="diagnostics"></button><span>v0.1.0 · TypeScript</span></footer>
-      <input type="file" id="file-input" accept=".xd,.xdlocal,.json" hidden /><div id="toast" role="status" aria-live="polite" hidden></div><div id="drop-overlay" hidden>${icon('import', 48)}<strong>放開以匯入設計稿</strong><span>.xd 或 .xdlocal 工作檔</span></div><div id="busy-overlay" hidden><span class="spinner"></span><strong id="busy-label">正在解析設計稿…</strong><span>所有處理都在本機進行</span></div><dialog id="modal"></dialog>`;
+      <input type="file" id="file-input" accept=".xd,.xdlocal,.json" hidden /><input type="file" id="font-input" accept=".woff2,.woff,.ttf,.otf" hidden /><div id="toast" role="status" aria-live="polite" hidden></div><div id="drop-overlay" hidden>${icon('import', 48)}<strong>放開以匯入設計稿</strong><span>.xd 或 .xdlocal 工作檔</span></div><div id="busy-overlay" hidden><span class="spinner"></span><strong id="busy-label">正在解析設計稿…</strong><span>所有處理都在本機進行</span></div><dialog id="modal"></dialog>`;
   }
   private bind() {
     const signal = this.abort.signal;
+    this.el<HTMLInputElement>('#font-input').addEventListener(
+      'change',
+      (event) => {
+        const input = event.target as HTMLInputElement;
+        if (input.files?.[0]) void this.loadFont(input.files[0]);
+        input.value = '';
+      },
+      { signal }
+    );
     this.root.addEventListener(
       'click',
       (event) => {
@@ -357,7 +368,18 @@ export class Studio {
   private async action(action: string, target?: HTMLElement) {
     try {
       if (action === 'open') this.el<HTMLInputElement>('#file-input').click();
-      else if (action === 'save') {
+      else if (action === 'fonts') this.fontDialog();
+      else if (action === 'font-add') this.el<HTMLInputElement>('#font-input').click();
+      else if (action === 'font-remove' && target?.dataset.id) {
+        const fonts = { ...this.project.document.fonts };
+        delete fonts[target.dataset.id];
+        await this.fontRegistry.load(fonts);
+        this.project.document.fonts = fonts;
+        this.scheduleSave();
+        this.renderCanvas();
+        if (this.mode === 'preview') this.renderPreview();
+        this.fontDialog();
+      } else if (action === 'save') {
         download(
           serializeProject(this.project),
           filename(this.project.document.name) + '.xdlocal',
@@ -464,6 +486,16 @@ export class Studio {
   setProject(project: Project, save = true) {
     this.generation++;
     this.project = project;
+    this.fontRegistry.clear();
+    void this.fontRegistry
+      .load(project.document.fonts)
+      .then(() => {
+        if (this.project === project) {
+          this.renderCanvas();
+          if (this.mode === 'preview') this.renderPreview();
+        }
+      })
+      .catch((error) => this.toast(error.message, true));
     this.boardId = project.document.artboards[0].id;
     this.selected = new Set([this.boardId]);
     this.collapsed.clear();
@@ -542,6 +574,7 @@ export class Studio {
     this.el('#board-caption').textContent = this.board.name;
     this.el('#design-stage').innerHTML = renderBoard(this.project.document, this.board, {
       selection: true,
+      embedFonts: false,
     });
     this.applyZoom();
   }
@@ -672,7 +705,7 @@ export class Studio {
       )}</div>${n.text?.estimatedBounds ? '<p class="hint">文字框為估算值，保留 XD 原始基線；請先安裝對應字型。</p>' : ''}<div class="property-grid mini-grid"><div class="property-value"><span>透明度</span><strong>${Math.round(s.opacity * 100)}%</strong></div><div class="property-value"><span>圓角</span><strong>${n.radius ? n.radius.map(round).join(' / ') : '—'}</strong></div></div></section>`;
     const fill = `<section class="property-section"><h3>填色</h3><button class="color-row" data-action="copy-color" data-color="${esc(color)}"><span class="color-chip" style="background:${esc(paintCss(s.fill))}"></span><code>${esc(color)}</code>${icon('copy', 14)}</button>${s.stroke ? `<div class="detail-row"><span>描邊</span><code>${s.stroke.width} px · ${esc(s.stroke.color)}</code></div>` : ''}${s.shadows.map((sh) => `<div class="detail-row"><span>陰影</span><code>${sh.x} ${sh.y} ${sh.blur} · ${esc(sh.color)}</code></div>`).join('')}</section>`;
     const type = n.text
-      ? `<section class="property-section"><h3>文字樣式</h3><p class="font-name">${esc(n.text.family)}</p><div class="property-grid"><div class="property-value"><span>字級</span><strong>${n.text.size}px</strong></div><div class="property-value"><span>字重</span><strong>${n.text.weight}</strong></div></div><div class="detail-row"><span>行高 / 字距</span><code>${round(n.text.lineHeight)} / ${round(n.text.spacing)} px</code></div><p class="text-content">${esc(n.text.value)}</p></section>`
+      ? `<section class="property-section"><h3>文字樣式 ${button('fonts', '載入字型', undefined, 'text-button')}</h3><p class="font-name">${esc(n.text.family)}</p><div class="property-grid"><div class="property-value"><span>字級</span><strong>${n.text.size}px</strong></div><div class="property-value"><span>字重</span><strong>${n.text.weight}</strong></div></div><div class="detail-row"><span>行高 / 字距</span><code>${round(n.text.lineHeight)} / ${round(n.text.spacing)} px</code></div><p class="text-content">${esc(n.text.value)}</p></section>`
       : '';
     return (
       position +
@@ -939,8 +972,40 @@ export class Studio {
     const diagnostics = this.project.document.diagnostics;
     this.dialog(
       this.modalHeading('匯入相容性報告', '精度限制會明確列出，請依設計需求檢查。') +
-        `<div class="modal-body">${diagnostics.length ? `<ul class="diagnostic-list">${diagnostics.map((d) => `<li><code>${esc(d.code)}</code><p>${esc(d.message)}</p>${d.nodeId ? `<small>${esc(findNode(this.project, d.nodeId)?.name ?? d.nodeId)}</small>` : ''}</li>`).join('')}</ul>` : '<div class="empty-report">✓ 此文件目前沒有相容性提醒。</div>'}<p class="hint">本工具仍在擴充 XD 格式相容性。模糊、複雜布林運算、元件覆寫及原始原型連線可能無法完整還原；請以實際稿件驗證。</p></div>`
+        `<div class="modal-body">${diagnostics.length ? `<ul class="diagnostic-list">${diagnostics.map((d) => `<li><code>${esc(d.code)}</code><p>${esc(d.message)}</p>${d.nodeId ? `<small>${esc(findNode(this.project, d.nodeId)?.name ?? d.nodeId)}</small>` : ''}</li>`).join('')}</ul>` : '<div class="empty-report">✓ 此文件目前沒有相容性提醒。</div>'}<p class="hint">本工具仍在擴充 XD 格式相容性。模糊、複雜布林運算、元件覆寫及原始原型連線可能無法完整還原；請以實際稿件驗證。</p><br/>${button('fonts', '管理本機字型', 'text', 'secondary full-width')}</div>`
     );
+  }
+  private fontDialog() {
+    const fonts = Object.values(this.project.document.fonts ?? {}),
+      families = usedFonts(this.project.document.artboards);
+    this.dialog(
+      this.modalHeading('本機字型', '補齊原稿字型，讓預覽與匯出的字形一致。') +
+        `<div class="modal-body"><label class="field">設計稿字型名稱<input id="font-family" list="font-families" maxlength="200" value="${esc(this.current?.text?.family ?? families[0] ?? '')}"/><datalist id="font-families">${families.map((f) => `<option value="${esc(f)}"></option>`).join('')}</datalist></label><div class="property-grid"><label class="field">字重<select id="font-weight">${[100, 200, 300, 400, 500, 600, 700, 800, 900].map((w) => `<option value="${w}" ${w === (this.current?.text?.weight ?? 400) ? 'selected' : ''}>${w}</option>`).join('')}</select></label><label class="field">樣式<select id="font-style"><option value="normal">一般</option><option value="italic">斜體</option></select></label></div>${button('font-add', '選擇本機字型檔', 'import', 'secondary full-width')}<p class="hint">WOFF2 / WOFF / TTF / OTF，單檔最多 20 MB。名稱與字重需對應原稿。字型會隨工作檔、SVG 與網頁一起保存，沒有網路字型請求。</p>${fonts.length ? `<ul class="diagnostic-list">${fonts.map((f) => `<li><strong>${esc(f.family)} · ${f.weight} · ${f.style === 'italic' ? '斜體' : '一般'}</strong><p>${esc(f.name)}</p>${button('font-remove', '移除', undefined, 'text-button', `data-id="${esc(f.id)}"`)}</li>`).join('')}</ul>` : ''}</div>`
+    );
+  }
+  private async loadFont(file: File) {
+    const project = this.project;
+    try {
+      const family = this.el<HTMLInputElement>('#font-family').value,
+        weight = Number(this.el<HTMLSelectElement>('#font-weight').value),
+        style = this.el<HTMLSelectElement>('#font-style').value as 'normal' | 'italic';
+      this.generation++;
+      this.setBusy(true, '正在載入本機字型…');
+      const font = await readFont(file, family, weight, style),
+        fonts = { ...project.document.fonts, [font.id]: font };
+      await this.fontRegistry.load(fonts);
+      if (this.project !== project) return;
+      project.document.fonts = fonts;
+      this.scheduleSave();
+      this.renderCanvas();
+      if (this.mode === 'preview') this.renderPreview();
+      this.fontDialog();
+      this.toast('字型已載入並加入工作檔');
+    } catch (error) {
+      this.toast(error instanceof Error ? error.message : String(error), true);
+    } finally {
+      this.setBusy(false);
+    }
   }
   private help() {
     this.dialog(
@@ -1014,6 +1079,7 @@ export class Studio {
     this.toastTimer = setTimeout(() => (toast.hidden = true), error ? 8000 : 4000);
   }
   destroy() {
+    this.fontRegistry.clear();
     this.abort.abort();
     this.preview?.dispose();
     clearTimeout(this.saveTimer);

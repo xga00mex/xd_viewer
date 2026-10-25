@@ -13,7 +13,9 @@
     "check": "tsc --noEmit && vitest run",
     "start": "node scripts/serve.mjs",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "smoke": "npm run build && node scripts/smoke.mjs",
+    "smoke:http": "node scripts/http-smoke.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

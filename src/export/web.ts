@@ -6,6 +6,7 @@ import { round, worldBounds } from '../core/geometry';
 import { appearance, declarations, paintCss } from './css';
 import { renderLocalSvg, renderAsset } from '../render/svg';
 import { runtimeSource } from './runtime';
+import { fontRules } from '../core/fonts';
 
 export interface WebOptions {
   responsive: boolean;
@@ -60,7 +61,13 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
     const binary = atob(asset.data.split(',')[1]);
     files[path] = Uint8Array.from(binary, (c) => c.charCodeAt(0));
   }
-  const rules: string[] = [baseCss],
+  const fontPaths: Record<string, string> = {};
+  for (const font of Object.values(project.document.fonts ?? {})) {
+    const path = `assets/${safeId(font.id)}.${font.mime.split('/')[1]}`;
+    fontPaths[font.id] = path;
+    files[path] = Uint8Array.from(atob(font.data.split(',')[1]), (c) => c.charCodeAt(0));
+  }
+  const rules: string[] = [baseCss, fontRules(project.document, undefined, fontPaths)],
     mediaRules: string[] = [];
   function node(n: DesignNode, parent: DesignNode | undefined, board: DesignNode): string {
     const layout = project.layouts[n.id] ?? defaultLayout(),
@@ -78,6 +85,13 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
         .slice(0, 32) || n.kind
     }-${safeId(n.id)}`;
     const vector = n.kind === 'path' || n.kind === 'line';
+    const svgAppearance =
+      vector ||
+      n.kind === 'ellipse' ||
+      n.style.fill.type === 'linear' ||
+      n.style.fill.type === 'radial' ||
+      (n.style.fill.type === 'image' && !!n.style.fill.transform) ||
+      !!n.style.stroke?.dash?.length;
     const selector = '.' + className,
       rule: Record<string, string> = {
         position: isBoard ? 'relative' : flow ? 'relative' : 'absolute',
@@ -214,6 +228,7 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
     } else if (n.kind === 'text' && n.text) {
       if (flow) {
         Object.assign(rule, appearance(n), { height: 'auto' });
+        delete rule['box-shadow'];
         const text = n.text;
         let cursor = 0;
         const chunks: string[] = [];
@@ -227,11 +242,7 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
         chunks.push(esc(text.value.slice(cursor)));
         content = chunks.join('');
       } else content = `<span class="visual">${renderLocalSvg(project.document, n)}</span>`;
-    } else if (
-      ['path', 'line', 'ellipse'].includes(n.kind) ||
-      n.style.fill.type === 'linear' ||
-      n.style.fill.type === 'radial'
-    ) {
+    } else if (svgAppearance) {
       content = `<span class="visual">${renderLocalSvg(project.document, n)}</span>`;
     } else if (n.kind === 'rect') {
       Object.assign(rule, appearance(n));
@@ -244,10 +255,6 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
           rule['background-position'] = 'center';
           rule['background-repeat'] = 'no-repeat';
         }
-        if (image.transform) {
-          content = `<span class="visual">${renderLocalSvg(project.document, n)}</span>`;
-          delete rule['background-image'];
-        }
       }
       if (n.style.stroke) {
         delete rule.border;
@@ -259,7 +266,7 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
       }
     }
     if (n.style.blendMode) rule['mix-blend-mode'] = n.style.blendMode;
-    if (n.style.shadows.length && n.kind !== 'rect' && !complex)
+    if (n.style.shadows.length && (n.kind !== 'rect' || svgAppearance) && !complex)
       rule.filter = n.style.shadows
         .map((s) => `drop-shadow(${s.x}px ${s.y}px ${s.blur / 2}px ${s.color})`)
         .join(' ');
@@ -289,7 +296,7 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
     2
   );
   files['README.md'] =
-    `# ${project.document.name}\n\n直接開啟 index.html 即可；無需 npm、CDN、React 或 Vue。\n\n- styles.css：以圖層名稱與固定 ID 命名，修改尺寸、定位與排版。\n- interactions.js：原生 JavaScript，負責 click、scroll 與縮放。\n- assets/：內嵌圖片與遮罩群組。\n- design-tokens.json：文件使用的色彩與字型。\n- 每個畫板一個 HTML；navigate 連到對應檔案。\n\n文字在精準定位中使用可編輯的 SVG text/tspan 保留原基線，flow 群組中的文字使用原生 HTML。請在本機安裝設計稿字型；未將商用字型打包。\n響應式不會自動猜測版面：請在工具的排版面板配置群組 flex/grid 及子圖層 pin/stretch。預設保留原始座標。\n\n## 匯出注意事項\n${[...warnings, ...project.document.diagnostics.map((d) => d.message)].map((s) => '- ' + s).join('\n')}\n`;
+    `# ${project.document.name}\n\n直接開啟 index.html 即可；無需 npm、CDN、React 或 Vue。\n\n- styles.css：以圖層名稱與固定 ID 命名，修改尺寸、定位與排版。\n- interactions.js：原生 JavaScript，負責 click、scroll 與縮放。\n- assets/：內嵌圖片與遮罩群組。\n- design-tokens.json：文件使用的色彩與字型。\n- 每個畫板一個 HTML；navigate 連到對應檔案。\n\n文字在精準定位中使用可編輯的 SVG text/tspan 保留原基線，flow 群組中的文字使用原生 HTML。工具中載入的字型已打包到 assets；其餘字型請在本機安裝。\n響應式不會自動猜測版面：請在工具的排版面板配置群組 flex/grid 及子圖層 pin/stretch。預設保留原始座標。\n\n## 匯出注意事項\n${[...warnings, ...project.document.diagnostics.map((d) => d.message)].map((s) => '- ' + s).join('\n')}\n`;
   return { files, pages, warnings };
 }
 export function webZip(bundle: WebBundle): Uint8Array {
@@ -318,19 +325,22 @@ export function createPreview(
     return url;
   };
   const assetUrls: Record<string, string> = {};
+  const mimeTypes: Record<string, string> = {
+    svg: 'image/svg+xml',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    webp: 'image/webp',
+    gif: 'image/gif',
+    woff2: 'font/woff2',
+    woff: 'font/woff',
+    ttf: 'font/ttf',
+    otf: 'font/otf',
+  };
   for (const [name, data] of Object.entries(bundle.files))
     if (name.startsWith('assets/'))
       assetUrls[name] = make(
         data,
-        name.endsWith('.svg')
-          ? 'image/svg+xml'
-          : name.endsWith('.png')
-            ? 'image/png'
-            : name.endsWith('.jpg')
-              ? 'image/jpeg'
-              : name.endsWith('.webp')
-                ? 'image/webp'
-                : 'image/gif'
+        mimeTypes[name.split('.').at(-1)!] ?? 'application/octet-stream'
       );
   const replaceAssets = (value: string) =>
     Object.entries(assetUrls).reduce((s, [path, url]) => s.replaceAll(path, url), value);
@@ -339,7 +349,7 @@ export function createPreview(
   const pages: Record<string, string> = {};
   // Navigation uses a small parent message protocol to swap sandboxed pages.
   const previewRuntime = make(
-    `document.addEventListener('click',function(e){var t=e.target.closest('[data-action="navigate"]');if(t){e.preventDefault();e.stopImmediatePropagation();parent.postMessage({type:'xd-preview-navigate',page:t.dataset.page},'*');}},true);`,
+    `function navigatePreview(e){var t=e.target.closest('[data-action="navigate"]');if(!t||(e.type==='keydown'&&e.key!=='Enter'&&e.key!==' '))return;e.preventDefault();e.stopImmediatePropagation();parent.postMessage({type:'xd-preview-navigate',page:t.dataset.page},'*');}document.addEventListener('click',navigatePreview,true);document.addEventListener('keydown',navigatePreview,true);`,
     'text/javascript'
   );
   for (const path of Object.values(bundle.pages)) {

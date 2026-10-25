@@ -83,7 +83,7 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
     arr(n.children).forEach((c) => readManifest(obj(c)));
   }
   readManifest(manifest);
-  const assets: Record<string, Asset> = {};
+  const assets: Record<string, Asset> = Object.create(null);
   for (const [path, data] of Object.entries(entries)) {
     if (!path.startsWith('resources/')) continue;
     const mime = imageMime(data);
@@ -93,7 +93,7 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
     }
   }
   const symbols = new Map<string, Raw>();
-  const shared: Raw = { gradients: {}, clipPaths: {} };
+  const shared: Raw = { gradients: Object.create(null), clipPaths: Object.create(null) };
   for (const agc of Object.values(agcs))
     for (const key of ['gradients', 'clipPaths'])
       Object.assign(shared[key], obj(agc.resources?.[key]));
@@ -262,7 +262,7 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
   function node(raw: Raw, depth = 0, chain: string[] = []): DesignNode {
     if (depth > 100 || ++sequence > 50000) throw new Error('圖層數量或巢狀深度超過安全上限。');
     let sourceId = str(raw.id, `layer-${sequence}`),
-      id = sourceId;
+      id = Object.hasOwn(Object.prototype, sourceId) ? `layer-${sourceId}` : sourceId;
     if (used.has(id)) id = `${sourceId}-${sequence}`;
     used.add(id);
     const type = str(raw.type),

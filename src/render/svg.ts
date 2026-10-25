@@ -1,12 +1,14 @@
 import type { Bounds, DesignDocument, DesignNode, Paint } from '../core/model';
 import { escapeHtml as esc, safeId } from '../core/escape';
-import { identity, multiply, round, transformBounds } from '../core/geometry';
+import { identity, multiply, round, transformBounds, union } from '../core/geometry';
+import { fontRules } from '../core/fonts';
 
 export interface SvgOptions {
   removeRadius?: boolean;
   selection?: boolean;
   includeHidden?: boolean;
   padding?: number;
+  embedFonts?: boolean;
 }
 interface Context {
   document: DesignDocument;
@@ -185,7 +187,41 @@ export function renderBoard(
 ): string {
   const ctx: Context = { document, options, defs: [], prefix: 'board-' };
   const content = render(board, ctx);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${board.bounds.width}" height="${board.bounds.height}" viewBox="0 0 ${board.bounds.width} ${board.bounds.height}" role="img" aria-label="${esc(board.name)}"><defs>${ctx.defs.join('')}</defs>${content}</svg>`;
+  const fonts = options.embedFonts === false ? '' : fontRules(document, [board]);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${board.bounds.width}" height="${board.bounds.height}" viewBox="0 0 ${board.bounds.width} ${board.bounds.height}" role="img" aria-label="${esc(board.name)}"><defs>${fonts ? `<style>${fonts}</style>` : ''}${ctx.defs.join('')}</defs>${content}</svg>`;
+}
+function visualBounds(node: DesignNode): Bounds {
+  let b = node.bounds;
+  if (!node.clip && node.children.length)
+    b = union([
+      b,
+      ...node.children
+        .filter((n) => n.visible)
+        .map((n) => transformBounds(visualBounds(n), n.transform)),
+    ]);
+  const stroke = node.style.stroke;
+  const outset = stroke
+    ? stroke.align === 'inside'
+      ? 0
+      : stroke.align === 'center'
+        ? stroke.width / 2
+        : stroke.width
+    : 0;
+  b = {
+    x: b.x - outset,
+    y: b.y - outset,
+    width: b.width + outset * 2,
+    height: b.height + outset * 2,
+  };
+  return union([
+    b,
+    ...node.style.shadows.map((s) => ({
+      x: b.x + s.x - s.blur * 2,
+      y: b.y + s.y - s.blur * 2,
+      width: b.width + s.blur * 4,
+      height: b.height + s.blur * 4,
+    })),
+  ]);
 }
 export function renderAsset(
   document: DesignDocument,
@@ -199,22 +235,20 @@ export function renderAsset(
     transform: [...node.transform.slice(0, 4), 0, 0] as DesignNode['transform'],
   };
   if (node.kind === 'artboard') return renderBoard(document, copy, options);
-  const b = transformBounds(copy.bounds, copy.transform);
-  const pad =
-    options.padding ??
-    Math.max(
-      0,
-      ...node.style.shadows.map((s) => Math.max(Math.abs(s.x), Math.abs(s.y)) + s.blur * 2),
-      node.style.stroke?.width ?? 0
-    );
+  const b = transformBounds(
+    options.padding === undefined ? visualBounds(copy) : copy.bounds,
+    copy.transform
+  );
+  const pad = options.padding ?? 0;
   const content = render(copy, ctx);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.max(1, b.width + pad * 2)}" height="${Math.max(1, b.height + pad * 2)}" viewBox="${b.x - pad} ${b.y - pad} ${Math.max(1, b.width + pad * 2)} ${Math.max(1, b.height + pad * 2)}"><defs>${ctx.defs.join('')}</defs>${content}</svg>`;
+  const fonts = options.embedFonts === false ? '' : fontRules(document, [node]);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.max(1, b.width + pad * 2)}" height="${Math.max(1, b.height + pad * 2)}" viewBox="${b.x - pad} ${b.y - pad} ${Math.max(1, b.width + pad * 2)} ${Math.max(1, b.height + pad * 2)}"><defs>${fonts ? `<style>${fonts}</style>` : ''}${ctx.defs.join('')}</defs>${content}</svg>`;
 }
 /** Render a leaf's local geometry. HTML wrappers own transform and opacity. */
 export function renderLocalSvg(document: DesignDocument, node: DesignNode): string {
   return renderAsset(
     document,
     { ...node, transform: identity(), style: { ...node.style, opacity: 1, shadows: [] } },
-    { padding: 0 }
+    { padding: 0, embedFonts: false }
   );
 }

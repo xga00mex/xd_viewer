@@ -24,6 +24,7 @@
 - 圖層名稱、文字與屬性均使用對應的 HTML/XML/CSS escaping；輸出類別固定加英文字首，不能讓數字開頭的圖層名變成無效 selector。
 - 互動只接受預先定義的行為，沒有自訂程式碼輸入。預覽 iframe 僅允許 scripts，沒有 same-origin；父層僅接受目前 iframe 發出的已知畫板導覽訊息。
 - IndexedDB 保存工作檔；50 步 undo/redo 僅保存設定，不重複複製大型內嵌圖像。
+- 可選的 `DesignDocument.fonts` 保存使用者載入的字型。FontRegistry 管理字型載入與文件切換時的釋放；HTML 輸出字型只打包一次，獨立 SVG 僅嵌入其文字使用的字型。字型載入／移除是文件資源操作，不列入互動設定的 undo/redo。
 
 ## 渲染與輸出
 

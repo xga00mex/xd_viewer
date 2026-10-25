@@ -92,6 +92,15 @@ export interface Asset {
   mime: string;
   data: string;
 }
+export interface FontAsset {
+  id: string;
+  name: string;
+  family: string;
+  weight: number;
+  style: 'normal' | 'italic';
+  mime: 'font/woff2' | 'font/woff' | 'font/ttf' | 'font/otf';
+  data: string;
+}
 export interface Diagnostic {
   code: string;
   message: string;
@@ -102,6 +111,7 @@ export interface DesignDocument {
   name: string;
   artboards: DesignNode[];
   assets: Record<string, Asset>;
+  fonts?: Record<string, FontAsset>;
   diagnostics: Diagnostic[];
   source: 'xd' | 'demo';
 }

@@ -162,6 +162,23 @@ const schema = z.object({
         data: z.string().regex(/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/),
       })
     ),
+    fonts: z
+      .record(
+        id,
+        z.object({
+          id,
+          name,
+          family: z.string().min(1).max(200),
+          weight: z.number().min(100).max(900),
+          style: z.enum(['normal', 'italic']),
+          mime: z.enum(['font/woff2', 'font/woff', 'font/ttf', 'font/otf']),
+          data: z
+            .string()
+            .max(28 * 1024 * 1024)
+            .regex(/^data:font\/(woff2|woff|ttf|otf);base64,[A-Za-z0-9+/=]+$/),
+        })
+      )
+      .optional(),
     diagnostics: z.array(z.object({ code: name, message: name, nodeId: id.optional() })).max(5000),
     source: z.enum(['xd', 'demo']),
   }),

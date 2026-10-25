@@ -4,7 +4,7 @@ export const escapeHtml = (value: unknown): string =>
     (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!
   );
 export const cssString = (value: string): string =>
-  JSON.stringify(value).replace(/</g, '\\3c ').replace(/>/g, '\\3e ');
+  JSON.stringify(value).replace(/&/g, '\\26 ').replace(/</g, '\\3c ').replace(/>/g, '\\3e ');
 export function safeId(value: string): string {
   let hash = 2166136261;
   for (const char of value) {
