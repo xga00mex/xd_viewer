@@ -6,6 +6,8 @@ Windows EXE 桌面版的 Adobe XD 設計稿檢視／切版工具。使用 TypeSc
 
 ## 啟動
 
+下載最新版：[GitHub Releases](https://github.com/xga00mex/xd_viewer/releases/latest)。在 Assets 下載 `XD-Local-0.2.0-Windows-x64.exe`，雙擊即可使用；同頁提供 SHA-256 校驗碼與 HTML 檢視範例。
+
 直接執行 `release/XD-Local-0.2.0-Windows-x64.exe`，或雙擊 `Start-XD-Local.cmd`。這是 Windows 10／11 x64 的可攜式程式，內含 Chromium 與 Node 執行環境，約 105 MiB；不另安裝執行環境。EXE 尚未使用發行者憑證簽章。
 
 原始碼開發才需要 Node.js 22.12 以上（本次為 24.19）。首次下載開發與封裝套件需要網路，建置完成後可離線運作。
@@ -29,7 +31,7 @@ npm run dist:win  # 產生 Windows EXE
 - **HTML 檢視匯出**：預設產生單一 HTML，內含所有畫板、素材、已載入字型及支援的互動；模擬 XD 網頁檢視的畫板導覽、返回、縮放、全螢幕、熱區提示與重新播放。保留原稿座標及實際捲動視窗，不套用響應式重排。
 - **程式碼匯出**：可另選 HTML／CSS／JS 原始碼 ZIP，每個畫板一頁，獨立 CSS、原生 JS、素材與 design tokens。穩定類別名稱、可選語意標籤；Flex／Grid、間距、內距、手機單欄、左右約束及整板縮放。
 - **工作檔**：原生開啟／儲存對話框；自動保存於 `%APPDATA%/XD Local/workspace.json`，關閉視窗前完成最後一次寫入。另存／開啟 `.xdlocal` 保存完整文件、互動與排版設定；不覆寫或寫回 `.xd`。
-- **版本控制**：Git `main` 分階段提交，套件版本由 `package-lock.json` 固定。未設定遠端或推送任何服務。
+- **版本控制**：Git `main` 分階段提交，套件版本由 `package-lock.json` 固定；原始碼與可下載版本發布於 [GitHub](https://github.com/xga00mex/xd_viewer)。
 
 ## 建議操作流程
 
