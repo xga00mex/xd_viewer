@@ -10,9 +10,27 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "tsc --noEmit && vitest run"
+    "check": "tsc --noEmit && vitest run",
+    "start": "node scripts/serve.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
-  "engines": { "node": ">=22.12.0" },
-  "dependencies": { "fflate": "^0.8.3", "svg-path-bounds": "^1.0.2", "zod": "^4.6.7" },
-  "devDependencies": { "@types/node": "^26.6.5", "@types/svg-path-bounds": "^1.0.2", "happy-dom": "^21.0.4", "sharp": "^0.35.5", "typescript": "^7.0.2", "vite": "^8.3.5", "vitest": "^5.0.5" }
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "svg-path-bounds": "^1.0.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/svg-path-bounds": "^1.0.2",
+    "happy-dom": "^21.0.4",
+    "prettier": "^3.9.10",
+    "sharp": "^0.35.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
 }

@@ -1,0 +1,30 @@
+const paths: Record<string, string> = {
+  import: 'M12 16V3m-4 4 4-4 4 4M4 14v6h16v-6',
+  export: 'M12 3v13m-4-4 4 4 4-4M4 17v4h16v-4',
+  layers: 'm12 3 10 6-10 6L2 9Zm-9 10 9 5 9-5m-18 5 9 5 9-5',
+  code: 'm8 6-6 6 6 6m8-12 6 6-6 6m-3-15-2 18',
+  play: 'm8 4 12 8-12 8Z',
+  search: 'M21 21l-5-5m2-6a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
+  chevron: 'm9 5 7 7-7 7',
+  check: 'm4 12 5 5L20 6',
+  close: 'm6 6 12 12M6 18 18 6',
+  cursor: 'm4 3 5 18 3-8 8-3Z',
+  ruler: 'm3 15 12-12 6 6-12 12Zm3-3 3 3m0-6 3 3m0-6 3 3',
+  image: 'M3 3h18v18H3ZM3 17l6-6 4 4 3-3 5 5M8 7h.01',
+  folder: 'M3 6h7l2 2h9v12H3Z',
+  rect: 'M4 4h16v16H4Z',
+  text: 'M4 5h16M12 5v15M8 20h8',
+  circle: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0',
+  path: 'm3 18 6-12 6 10 6-12M3 16v4m18-18v4',
+  board: 'M4 2v20M20 2v20M2 4h20M2 20h20',
+  copy: 'M9 9h12v12H9ZM15 6V3H3v12h3',
+  undo: 'M3 9h11a7 7 0 0 1 0 14M3 9l6-6M3 9l6 6',
+  redo: 'M21 9H10a7 7 0 0 0 0 14m11-14-6-6m6 6-6 6',
+  save: 'M3 3h15l3 3v15H3ZM7 3v6h10V3M7 21v-8h10v8',
+  info: 'M12 11v6m0-10h.01M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
+  fit: 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M8 8h8v8H8Z',
+  sun: 'M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8m0-6v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2',
+};
+export function icon(name: string, size = 16): string {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name] ?? paths.rect}"/></svg>`;
+}

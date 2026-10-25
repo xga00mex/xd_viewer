@@ -6,14 +6,14 @@
 
 採用 **TypeScript 自有 AGC adapter + fflate ZIP 解壓縮 + SVG 場景渲染**。先保留 XD 的階層、矩陣、原始幾何、文字分行與資源引用，再轉成獨立中介模型；HTML/CSS 匯出是另一個模組。這樣能分開處理「忠實預覽」與「可維護的網頁排版」，也能逐步加入格式版本處理。
 
-| 方案 | 查證結果 | 決策 |
-| --- | --- | --- |
-| Adobe XD Plugin API | 可取得 scenegraph，但 API 是 XD 內的 plugin 執行環境；沒有提供這個本機獨立工具所需的 `.xd` 解壓器 | 不作執行依賴 |
-| Adobe Cloud Content API | 以已發佈文件連結、API key、必要時 OAuth 取得雲端資料 | 不符合完全本機需求 |
-| `L2jLiga/xd2svg` | MIT、TypeScript、ZIP/AGC 到 SVG；repo 2020-10-02 封存，使用 Node 檔案系統；作者列有 blur 精度問題 | 研究格式與使用其 MIT 測試資料，不直接把舊 converter 當核心 |
-| `umar-ahmed/xdtools` | MIT、Python、README 明確標 WIP；原始碼提供 shape/style/artboard 讀取 | 交叉核對欄位；不增加 Python 執行環境 |
-| `dilitirio/xd-scenegraph-toolkit` | MIT、Python extractor 與社群格式筆記 | 輔助找新版欄位；筆記與真實樣本不同時，以可驗證樣本為準 |
-| `fflate` | MIT、純 JS、TypeScript 型別、browser/Node、ZIP 壓縮與解壓 | 僅使用需要的 ZIP 功能，本機打包，不用 CDN |
+| 方案                              | 查證結果                                                                                          | 決策                                                       |
+| --------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Adobe XD Plugin API               | 可取得 scenegraph，但 API 是 XD 內的 plugin 執行環境；沒有提供這個本機獨立工具所需的 `.xd` 解壓器 | 不作執行依賴                                               |
+| Adobe Cloud Content API           | 以已發佈文件連結、API key、必要時 OAuth 取得雲端資料                                              | 不符合完全本機需求                                         |
+| `L2jLiga/xd2svg`                  | MIT、TypeScript、ZIP/AGC 到 SVG；repo 2020-10-02 封存，使用 Node 檔案系統；作者列有 blur 精度問題 | 研究格式與使用其 MIT 測試資料，不直接把舊 converter 當核心 |
+| `umar-ahmed/xdtools`              | MIT、Python、README 明確標 WIP；原始碼提供 shape/style/artboard 讀取                              | 交叉核對欄位；不增加 Python 執行環境                       |
+| `dilitirio/xd-scenegraph-toolkit` | MIT、Python extractor 與社群格式筆記                                                              | 輔助找新版欄位；筆記與真實樣本不同時，以可驗證樣本為準     |
+| `fflate`                          | MIT、純 JS、TypeScript 型別、browser/Node、ZIP 壓縮與解壓                                         | 僅使用需要的 ZIP 功能，本機打包，不用 CDN                  |
 
 來源：[Adobe scenegraph](https://developer.adobe.com/xd/uxp/develop/reference/scenegraph/)、[Adobe Cloud API quick start](https://github.com/AdobeXD/cloud-content-api-docs/blob/master/tutorials/quick-start.md)、[xd2svg](https://github.com/L2jLiga/xd2svg)、[xdtools](https://github.com/umar-ahmed/xdtools)、[scenegraph toolkit](https://github.com/dilitirio/xd-scenegraph-toolkit)、[fflate](https://github.com/101arrowz/fflate)。
 
@@ -54,22 +54,22 @@ thumbnail.png
 
 ## 幾何、樣式及文字
 
-| 類別 | 已確認的欄位與處理 |
-| --- | --- |
-| Rectangle | `shape.type = rect`；`x/y/width/height`；可選 `r` 四角半徑陣列 |
-| Circle / ellipse | `cx/cy/r` 或 `cx/cy/rx/ry`；中心不可誤當左上角 |
-| Line | `x1/y1/x2/y2` |
-| Path / compound | `shape.path` 是 SVG path data；compound 也可能帶 children 與 operation |
-| Fill | `style.fill.type = solid/none/gradient/pattern`；solid 的 `color.value` 是 `{r,g,b}`，`alpha` 可選 |
-| Gradient | `fill.gradient.ref` 指向 resources.gradients；實例上帶方向或中心座標，資源提供 type/stops |
-| Image fill | `fill.pattern.width/height` 是圖源尺寸；`pattern.meta.ux.uid` 指資源，`scaleBehavior` 有 cover/fill |
-| Stroke | type/color/width/align；inside、outside、center 需要分開處理，SVG 預設中心描邊不能一概代替 |
-| Clip | `style.clipPath.ref` 對應 resources.clipPaths；剪裁資源本身可包含圖層 |
-| Shadow | `style.filters[]` 的 `type = dropShadow`，參數在 `params.dropShadows[]`，包含 dx/dy/r/color |
-| Blur | `uxdesign#blur` 的 params 包含 blurAmount/backgroundEffect 等；背景模糊與物件模糊不同 |
-| Text | `text.rawText`；`text.paragraphs[].lines[][]` 存 from/to/x/y；應尊重原分行，x/y 是 baseline 座標 |
-| Font | `style.font.family/postscriptName/style/size`；另有 `style.textAttributes.paragraphAlign/letterSpacing` |
-| Rich text | 實測 `meta.ux.rangedStyles[]` 有 length/fontFamily/fontStyle/fontSize/charSpacing/fill；fill.value 可為 ARGB 整數 |
+| 類別             | 已確認的欄位與處理                                                                                                |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Rectangle        | `shape.type = rect`；`x/y/width/height`；可選 `r` 四角半徑陣列                                                    |
+| Circle / ellipse | `cx/cy/r` 或 `cx/cy/rx/ry`；中心不可誤當左上角                                                                    |
+| Line             | `x1/y1/x2/y2`                                                                                                     |
+| Path / compound  | `shape.path` 是 SVG path data；compound 也可能帶 children 與 operation                                            |
+| Fill             | `style.fill.type = solid/none/gradient/pattern`；solid 的 `color.value` 是 `{r,g,b}`，`alpha` 可選                |
+| Gradient         | `fill.gradient.ref` 指向 resources.gradients；實例上帶方向或中心座標，資源提供 type/stops                         |
+| Image fill       | `fill.pattern.width/height` 是圖源尺寸；`pattern.meta.ux.uid` 指資源，`scaleBehavior` 有 cover/fill               |
+| Stroke           | type/color/width/align；inside、outside、center 需要分開處理，SVG 預設中心描邊不能一概代替                        |
+| Clip             | `style.clipPath.ref` 對應 resources.clipPaths；剪裁資源本身可包含圖層                                             |
+| Shadow           | `style.filters[]` 的 `type = dropShadow`，參數在 `params.dropShadows[]`，包含 dx/dy/r/color                       |
+| Blur             | `uxdesign#blur` 的 params 包含 blurAmount/backgroundEffect 等；背景模糊與物件模糊不同                             |
+| Text             | `text.rawText`；`text.paragraphs[].lines[][]` 存 from/to/x/y；應尊重原分行，x/y 是 baseline 座標                  |
+| Font             | `style.font.family/postscriptName/style/size`；另有 `style.textAttributes.paragraphAlign/letterSpacing`           |
+| Rich text        | 實測 `meta.ux.rangedStyles[]` 有 length/fontFamily/fontStyle/fontSize/charSpacing/fill；fill.value 可為 ARGB 整數 |
 
 依據：[shape model](https://github.com/L2jLiga/xd2svg/blob/937365e71fe735751053e918b3ba02cfa546ce7a/src/converter/core/models/shape.ts)、[fill converter](https://github.com/L2jLiga/xd2svg/blob/937365e71fe735751053e918b3ba02cfa546ce7a/src/converter/core/styles/fill.ts)、[filter converter](https://github.com/L2jLiga/xd2svg/blob/937365e71fe735751053e918b3ba02cfa546ce7a/src/converter/core/styles/filters.ts)、[text converter](https://github.com/L2jLiga/xd2svg/blob/937365e71fe735751053e918b3ba02cfa546ce7a/src/converter/core/converters/text.ts)、[xdtools parser](https://github.com/umar-ahmed/xdtools/blob/master/xdtools/utils/parser.py)、上述 fixture。
 
