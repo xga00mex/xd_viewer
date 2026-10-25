@@ -55,6 +55,11 @@ function clipGeometry(n: DesignNode, ctx: Context, parent = identity()): string 
     ? n.children.map((c) => clipGeometry(c, ctx, transform)).join('')
     : geometry(n, { fill: 'black', transform: mat(transform) }, !!ctx.options.removeRadius);
 }
+export function htmlClipDefinition(document: DesignDocument, node: DesignNode, id: string): string {
+  if (!node.clip) return '';
+  const ctx: Context = { document, options: {}, defs: [], prefix: 'html-' };
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute;pointer-events:none" aria-hidden="true"><defs><clipPath id="${esc(id)}" clipPathUnits="userSpaceOnUse">${clipGeometry(node.clip, ctx, [1, 0, 0, 1, -node.bounds.x, -node.bounds.y])}</clipPath></defs></svg>`;
+}
 function fill(paint: Paint, node: DesignNode, ctx: Context): string {
   if (paint.type === 'none') return 'none';
   if (paint.type === 'solid') return paint.color;

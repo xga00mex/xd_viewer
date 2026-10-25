@@ -1,5 +1,7 @@
 node_modules
 dist
+desktop-dist
+release
 .cache
 coverage
 tests/fixtures

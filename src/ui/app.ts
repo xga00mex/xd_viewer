@@ -19,6 +19,8 @@ import { renderBoard } from '../render/svg';
 import { demoProject } from '../demo';
 import { icon } from './icons';
 import { FontRegistry, readFont, usedFonts } from '../core/fonts';
+import { desktop, nativeFile } from '../platform/desktop';
+import { exportViewer } from '../export/viewer';
 
 const kindLabel: Record<string, string> = {
   artboard: '畫板',
@@ -67,6 +69,7 @@ export class Studio {
   private viewportWidth = 1200;
   private webOptions: WebOptions = defaultWebOptions();
   private saveTimer?: ReturnType<typeof setTimeout>;
+  private hasLocalChanges = false;
   private previewTimer?: ReturnType<typeof setTimeout>;
   private toastTimer?: ReturnType<typeof setTimeout>;
   private generation = 0;
@@ -75,6 +78,8 @@ export class Studio {
   private space = false;
   private pan?: { x: number; y: number; left: number; top: number };
   private exportTab: 'web' | 'assets' = 'web';
+  private exportMode: 'viewer' | 'code' = 'viewer';
+  private unsubscribeMenu?: () => void;
   private assetOptions: AssetOptions = { format: 'svg', scale: 1, removeRadius: false };
   private abort = new AbortController();
   constructor(
@@ -102,6 +107,11 @@ export class Studio {
   async restore() {
     const version = this.generation;
     try {
+      const startup = await desktop()?.startupFile();
+      if (startup && this.generation === version) {
+        await this.load(nativeFile(startup));
+        return;
+      }
       const saved = await restoreLocal();
       if (saved && this.generation === version) {
         this.setProject(saved, false);
@@ -118,11 +128,14 @@ export class Studio {
       <main class="center-panel"><div class="canvas-toolbar"><div class="mode-switch">${button('design', '檢視', 'cursor', 'active')}${button('preview', '互動預覽', 'play')}</div><div class="toolbar-spacer"></div><div id="preview-tools" hidden><select id="viewport-width" aria-label="預覽裝置寬度"><option value="375">手機 · 375</option><option value="768">平板 · 768</option><option value="1200">桌面 · 1200</option><option value="original">原始尺寸</option></select>${button('refresh-preview', '重播', undefined, 'text-button')}</div><div id="zoom-tools">${button('zoom-out', '−', undefined, 'icon-button', 'aria-label="縮小"')}<button data-action="zoom-reset" id="zoom-label">60%</button>${button('zoom-in', '+', undefined, 'icon-button', 'aria-label="放大"')}${button('fit', '', 'fit', 'icon-button', 'aria-label="符合視窗" title="符合視窗 (F)"')}</div></div>
       <div class="canvas-viewport" id="canvas-viewport"><div class="canvas-paper" id="canvas-paper"><div id="board-caption"></div><div id="design-stage"></div><svg id="selection-overlay" xmlns="http://www.w3.org/2000/svg"></svg></div></div><div id="preview-stage" hidden><iframe title="本機互動預覽" sandbox="allow-scripts" srcdoc=""></iframe></div><div class="canvas-bottom"><span id="canvas-status">Ctrl／⌘ 多選 · Alt 測距 · 空白鍵拖曳</span><div>${button('undo', '', 'undo', 'icon-button', 'aria-label="復原" title="Ctrl+Z"')}${button('redo', '', 'redo', 'icon-button', 'aria-label="重做" title="Ctrl+Shift+Z"')}<span class="divider"></span><span id="dimensions"></span></div></div></main>
       <aside class="right-panel panel"><div class="panel-tabs inspector-tabs"><button data-action="inspect" class="active">屬性</button><button data-action="interact">互動</button><button data-action="layout">排版</button></div><div id="inspector"></div></aside></div>
-      <footer class="statusbar"><span>LOCAL FIRST <span class="status-separator">/</span> 無需 Adobe XD</span><button id="diagnostic-button" data-action="diagnostics"></button><span>v0.1.0 · TypeScript</span></footer>
+      <footer class="statusbar"><span>LOCAL FIRST <span class="status-separator">/</span> 無需 Adobe XD</span><button id="diagnostic-button" data-action="diagnostics"></button><span>v0.2.0 · Desktop</span></footer>
       <input type="file" id="file-input" accept=".xd,.xdlocal,.json" hidden /><input type="file" id="font-input" accept=".woff2,.woff,.ttf,.otf" hidden /><div id="toast" role="status" aria-live="polite" hidden></div><div id="drop-overlay" hidden>${icon('import', 48)}<strong>放開以匯入設計稿</strong><span>.xd 或 .xdlocal 工作檔</span></div><div id="busy-overlay" hidden><span class="spinner"></span><strong id="busy-label">正在解析設計稿…</strong><span>所有處理都在本機進行</span></div><dialog id="modal"></dialog>`;
   }
   private bind() {
     const signal = this.abort.signal;
+    this.unsubscribeMenu = desktop()?.onMenu((action) => {
+      void this.action(action);
+    });
     this.el<HTMLInputElement>('#font-input').addEventListener(
       'change',
       (event) => {
@@ -345,7 +358,7 @@ export class Studio {
       this.space = true;
     } else if (mod && event.key.toLowerCase() === 'o') {
       event.preventDefault();
-      this.el<HTMLInputElement>('#file-input').click();
+      void this.action('open');
     } else if (mod && event.key.toLowerCase() === 's') {
       event.preventDefault();
       void this.action('save');
@@ -366,11 +379,34 @@ export class Studio {
     else if (event.key.toLowerCase() === 'f') this.fit();
   }
   private async action(action: string, target?: HTMLElement) {
+    if (action === 'app-close') {
+      clearTimeout(this.saveTimer);
+      try {
+        if (this.hasLocalChanges) await saveLocal(this.project);
+        await desktop()?.finishClose();
+      } catch (error) {
+        this.toast('無法儲存工作階段，視窗暫不關閉：' + String(error), true);
+      }
+      return;
+    }
     try {
-      if (action === 'open') this.el<HTMLInputElement>('#file-input').click();
-      else if (action === 'fonts') this.fontDialog();
-      else if (action === 'font-add') this.el<HTMLInputElement>('#font-input').click();
-      else if (action === 'font-remove' && target?.dataset.id) {
+      if (action === 'open') {
+        const native = desktop();
+        if (native) {
+          const file = await native.openFile('design');
+          if (file) await this.load(nativeFile(file));
+        } else this.el<HTMLInputElement>('#file-input').click();
+      } else if (action === 'startup') {
+        const file = await desktop()?.startupFile();
+        if (file) await this.load(nativeFile(file));
+      } else if (action === 'fonts') this.fontDialog();
+      else if (action === 'font-add') {
+        const native = desktop();
+        if (native) {
+          const file = await native.openFile('font');
+          if (file) await this.loadFont(nativeFile(file));
+        } else this.el<HTMLInputElement>('#font-input').click();
+      } else if (action === 'font-remove' && target?.dataset.id) {
         const fonts = { ...this.project.document.fonts };
         delete fonts[target.dataset.id];
         await this.fontRegistry.load(fonts);
@@ -380,12 +416,12 @@ export class Studio {
         if (this.mode === 'preview') this.renderPreview();
         this.fontDialog();
       } else if (action === 'save') {
-        download(
+        const saved = await download(
           serializeProject(this.project),
           filename(this.project.document.name) + '.xdlocal',
           'application/json'
         );
-        this.toast('已匯出工作檔，含原始圖層、素材及互動設定');
+        if (saved) this.toast('已儲存工作檔，含原始圖層、素材及互動設定');
       } else if (action === 'demo') {
         this.el<HTMLDialogElement>('#modal').close();
         this.setProject(demoProject());
@@ -831,6 +867,11 @@ export class Studio {
   private changeField(key: string, value: string, checked: boolean) {
     if (key.startsWith('export.')) {
       const field = key.slice(7);
+      if (field === 'mode') {
+        this.exportMode = value as 'viewer' | 'code';
+        this.exportDialog();
+        return;
+      }
       if (field === 'format') this.assetOptions.format = value as AssetOptions['format'];
       else if (field === 'scale') this.assetOptions.scale = Number(value) as 1 | 2 | 3;
       else if (field === 'removeRadius') this.assetOptions.removeRadius = checked;
@@ -911,6 +952,7 @@ export class Studio {
     this.el<HTMLButtonElement>('[data-action="redo"]').disabled = !this.history.canRedo;
   }
   private scheduleSave() {
+    this.hasLocalChanges = true;
     clearTimeout(this.saveTimer);
     const revision = ++this.saveRevision;
     this.el('#save-state').textContent = '儲存中…';
@@ -920,7 +962,7 @@ export class Studio {
         if (revision === this.saveRevision) this.el('#save-state').textContent = '已儲存在本機';
       } catch {
         this.el('#save-state').textContent = '請另存工作檔';
-        this.toast('瀏覽器儲存空間不足或未開放，請使用「儲存工作檔」。', true);
+        this.toast('本機自動儲存失敗，請使用「儲存工作檔」另存備份。', true);
       }
     }, 400);
   }
@@ -1021,11 +1063,16 @@ export class Studio {
     this.dialog(
       this.modalHeading(
         '匯出作品',
-        web ? '乾淨的原生檔案，準備好進入你的開發流程。' : '素材在本機產生，原始設計不會被修改。'
+        web
+          ? '匯出可直接開啟的設計稿檢視器，或供切版的原始碼。'
+          : '素材在本機產生，原始設計不會被修改。'
       ) +
-        `<div class="export-tabs">${button('export-tab-web', '網頁程式碼', 'code', web ? 'active' : '')}${button('export-tab-assets', '設計素材', 'image', !web ? 'active' : '')}</div><div class="modal-body">${
+        `<div class="export-tabs">${button('export-tab-web', 'HTML 檢視 / 程式碼', 'code', web ? 'active' : '')}${button('export-tab-assets', '設計素材', 'image', !web ? 'active' : '')}</div><div class="modal-body">${
           web
-            ? `<div class="export-summary"><span class="file-badge">HTML</span><span class="file-badge">CSS</span><span class="file-badge">JS</span><span>+ assets + design tokens</span></div><label class="checkbox-field"><input data-field="export.responsive" type="checkbox" ${this.webOptions.responsive ? 'checked' : ''}/>套用排版面板中的響應式設定</label>${numeric('export.breakpoint', '手機斷點', this.webOptions.breakpoint, 320, 1600)}<label class="checkbox-field"><input data-field="export.scaleArtboard" type="checkbox" ${this.webOptions.scaleArtboard ? 'checked' : ''}/>整張畫板等比縮小以符合視窗</label><p class="hint">等比縮小適合展示精準設計；可維護的響應式網站建議配置 Flex / Grid。未設定的元素保留原始座標。輸出 ${this.project.document.artboards.length} 個畫板頁面。</p>`
+            ? `${select('export.mode', '匯出用途', this.exportMode, [
+                ['viewer', 'HTML 檢視器 · 保留設計與互動'],
+                ['code', 'HTML / CSS / JS 原始碼 ZIP'],
+              ])}${this.exportMode === 'viewer' ? '<div class="export-summary"><span class="file-badge">單一 HTML</span><span>所有畫板、素材與字型都在檔案內</span></div><p class="hint">模擬 XD 網頁檢視：畫板導覽、縮放、全螢幕、熱區提示與互動播放。保留原始畫板尺寸、捲動視窗與已支援效果；不會套用流式排版重排設計。</p>' : `<div class="export-summary"><span class="file-badge">HTML</span><span class="file-badge">CSS</span><span class="file-badge">JS</span><span>+ assets + design tokens</span></div><label class="checkbox-field"><input data-field="export.responsive" type="checkbox" ${this.webOptions.responsive ? 'checked' : ''}/>套用排版面板中的響應式設定</label>${numeric('export.breakpoint', '手機斷點', this.webOptions.breakpoint, 320, 1600)}<label class="checkbox-field"><input data-field="export.scaleArtboard" type="checkbox" ${this.webOptions.scaleArtboard ? 'checked' : ''}/>整張畫板等比縮小以符合視窗</label><p class="hint">等比縮小適合展示精準設計；可維護的響應式網站建議配置 Flex / Grid。未設定的元素保留原始座標。輸出 ${this.project.document.artboards.length} 個畫板頁面。</p>`}`
             : `<p class="selection-summary">已選取 <strong>${this.selected.size}</strong> 個圖層${this.selected.size > 1 ? '，將打包為 ZIP' : ''}</p>${select(
                 'export.format',
                 '檔案格式',
@@ -1039,7 +1086,7 @@ export class Studio {
                 ['2', '2× 高解析度'],
                 ['3', '3× 高解析度'],
               ])}<label class="checkbox-field"><input data-field="export.removeRadius" type="checkbox" ${this.assetOptions.removeRadius ? 'checked' : ''}/>移除矩形與遮罩的圓角</label><p class="hint">包含群組內的圓角。已烘焙進圖片本身的圓角無法還原。SVG 保留可編輯文字，開啟時需要原字型。</p>`
-        }</div><div class="modal-footer"><span>所有處理都在本機完成</span>${button('download-export', web ? '下載網頁 ZIP' : '下載素材', 'export', 'primary', !web && !this.selected.size ? 'disabled' : '')}</div>`
+        }</div><div class="modal-footer"><span>所有處理都在本機完成</span>${button('download-export', web ? (this.exportMode === 'viewer' ? '匯出 HTML 檢視' : '匯出程式碼 ZIP') : '匯出素材', 'export', 'primary', !web && !this.selected.size ? 'disabled' : '')}</div>`
     );
   }
   private async performExport() {
@@ -1049,19 +1096,40 @@ export class Studio {
     trigger.textContent = '正在產生…';
     try {
       if (this.exportTab === 'web') {
-        const bundle = exportWeb(this.project, this.webOptions);
-        download(
-          webZip(bundle),
-          filename(this.project.document.name) + '-web.zip',
-          'application/zip'
-        );
-        this.toast(`已匯出網頁${bundle.warnings.length ? '；注意事項已附在 README.md' : ''}`);
+        if (this.exportMode === 'viewer') {
+          const saved = await download(
+            exportViewer(this.project),
+            filename(this.project.document.name) + '-檢視.html',
+            'text/html'
+          );
+          if (!saved) {
+            this.exportDialog();
+            return;
+          }
+          this.toast('已匯出單一 HTML 檢視器，包含素材、字型與互動');
+        } else {
+          const bundle = exportWeb(this.project, this.webOptions);
+          const saved = await download(
+            webZip(bundle),
+            filename(this.project.document.name) + '-web.zip',
+            'application/zip'
+          );
+          if (!saved) {
+            this.exportDialog();
+            return;
+          }
+          this.toast(`已匯出網頁${bundle.warnings.length ? '；注意事項已附在 README.md' : ''}`);
+        }
       } else {
         const nodes = [...this.selected]
           .map((id) => findNode(this.project, id))
           .filter((n): n is DesignNode => !!n);
         const result = await exportAssets(this.project.document, nodes, this.assetOptions);
-        download(result.bytes, result.name, result.mime);
+        const saved = await download(result.bytes, result.name, result.mime);
+        if (!saved) {
+          this.exportDialog();
+          return;
+        }
         this.toast('素材已匯出');
       }
       this.el<HTMLDialogElement>('#modal').close();
@@ -1079,6 +1147,7 @@ export class Studio {
     this.toastTimer = setTimeout(() => (toast.hidden = true), error ? 8000 : 4000);
   }
   destroy() {
+    this.unsubscribeMenu?.();
     this.fontRegistry.clear();
     this.abort.abort();
     this.preview?.dispose();

@@ -4,7 +4,7 @@ import { defaultLayout, flatten } from '../core/model';
 import { escapeHtml as esc, filename, safeId, cssString } from '../core/escape';
 import { round, worldBounds } from '../core/geometry';
 import { appearance, declarations, paintCss } from './css';
-import { renderLocalSvg, renderAsset } from '../render/svg';
+import { renderLocalSvg, renderAsset, htmlClipDefinition } from '../render/svg';
 import { runtimeSource } from './runtime';
 import { fontRules } from '../core/fonts';
 
@@ -215,7 +215,7 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
       rule.animation = `xd-${a.effect} ${a.duration}ms ease ${a.repeat ? 'infinite' : '1 both'}`;
     }
     let content = '';
-    const complex = n.clip || n.kind === 'unsupported';
+    const complex = n.kind === 'unsupported';
     if (complex) {
       const path = `assets/${safeId(n.id)}.svg`;
       files[path] = renderAsset(
@@ -224,7 +224,8 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
         { padding: 0 }
       );
       content = `<img class="visual" src="${path}" alt="${esc(n.name)}" />`;
-      if (n.children.length) warnings.push(`${n.name}：遮罩群組保留為 SVG，內部圖層互動不會輸出。`);
+      if (n.children.length)
+        warnings.push(`${n.name}：尚未支援的群組保留為 SVG，內部圖層互動不會輸出。`);
     } else if (n.kind === 'text' && n.text) {
       if (flow) {
         Object.assign(rule, appearance(n), { height: 'auto' });
@@ -271,6 +272,11 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
         .map((s) => `drop-shadow(${s.x}px ${s.y}px ${s.blur / 2}px ${s.color})`)
         .join(' ');
     if (!complex) content += n.children.map((c) => node(c, n, board)).join('\n');
+    if (n.clip && !complex) {
+      const clipId = `clip-${safeId(n.id)}`;
+      rule['clip-path'] = `url(#${clipId})`;
+      content = htmlClipDefinition(project.document, n, clipId) + content;
+    }
     rules.push(
       `/* ${n.name.replace(/\*\//g, '').replace(/[\r\n]/g, ' ')} */\n${selector} {\n${declarations(rule)}\n}`
     );

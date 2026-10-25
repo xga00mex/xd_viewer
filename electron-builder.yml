@@ -1,0 +1,22 @@
+appId: studio.xdlocal.desktop
+productName: XD Local
+directories:
+  output: release
+files:
+  - dist/**/*
+  - desktop-dist/**/*
+  - package.json
+  - THIRD_PARTY_NOTICES.txt
+  - '!node_modules/**/*'
+asar: true
+npmRebuild: false
+electronDist: node_modules/electron/dist
+win:
+  target:
+    - target: portable
+      arch: [x64]
+  artifactName: XD-Local-${version}-Windows-x64.exe
+  signExecutable: false
+  icon: desktop/icon.ico
+portable:
+  artifactName: XD-Local-${version}-Windows-x64.exe

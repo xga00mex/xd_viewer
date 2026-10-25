@@ -23,16 +23,28 @@
 - 工作檔透過 Zod 驗證，限定數值、列舉、顏色與內嵌點陣圖格式；禁止任意 HTML、JS、CSS 與外部 URL。
 - 圖層名稱、文字與屬性均使用對應的 HTML/XML/CSS escaping；輸出類別固定加英文字首，不能讓數字開頭的圖層名變成無效 selector。
 - 互動只接受預先定義的行為，沒有自訂程式碼輸入。預覽 iframe 僅允許 scripts，沒有 same-origin；父層僅接受目前 iframe 發出的已知畫板導覽訊息。
-- IndexedDB 保存工作檔；50 步 undo/redo 僅保存設定，不重複複製大型內嵌圖像。
+- 桌面版透過受限 IPC 將工作檔原子寫入使用者資料目錄；瀏覽器開發模式才使用 IndexedDB。50 步 undo/redo 僅保存設定，不重複複製大型內嵌圖像。
 - 可選的 `DesignDocument.fonts` 保存使用者載入的字型。FontRegistry 管理字型載入與文件切換時的釋放；HTML 輸出字型只打包一次，獨立 SVG 僅嵌入其文字使用的字型。字型載入／移除是文件資源操作，不列入互動設定的 undo/redo。
 
 ## 渲染與輸出
 
 `render/svg.ts` 共用於設計稿、SVG 素材、Canvas PNG 與 HTML 的向量部分。圖層位置／畫板位置、描邊對齊及透明度不能在各輸出端重複套用。
 
-HTML 匯出以原生節點、獨立 stylesheet 與資源目錄為主。矩形保留 CSS、向量與定位文字保留 SVG、流式文字使用 HTML。剪裁複雜群組目前整組 SVG 化；之後可用 CSS clip-path adapter 擴充，但不得默默丟掉子元素互動。
+HTML 匯出以原生節點、獨立 stylesheet 與資源目錄為主。矩形保留 CSS、向量與定位文字保留 SVG、流式文字使用 HTML。剪裁群組用零尺寸 SVG 定義 clipPath，再套到 HTML 容器，保留子元素的互動與語意。
 
 預覽使用 `exportWeb` 的同一組輸出並轉換成 Blob URL。每次更新或離開預覽都回收 URL。`interactionRuntime` 必須保持獨立函式，所有依賴都放在函式內，因為它會序列化為匯出的獨立 JS。
+
+## Windows 桌面與 HTML 檢視
+
+Electron 主程式載入封裝內的 `xd-local://app/index.html`，不提供 localhost HTTP 服務。renderer 採 `sandbox`、`contextIsolation`，停用 Node 整合；preload 只公開開啟選檔、儲存檔案、工作階段讀寫及選單事件。每次 IPC 驗證來源必須是主視窗的主 frame 及固定 app URL，沙箱預覽不能存取桌面檔案。網路 HTTP(S)／WebSocket、外部導覽與新視窗預設拒絕。
+
+工作階段由主程式序列寫入暫存檔後原子更名。關閉視窗時先要求 renderer 提交尚未完成的變更，成功才結束；存檔失敗留在視窗並顯示錯誤。
+
+`exportViewer` 重用 `exportWeb`，強制保留原始座標，把圖片、SVG、字型、CSS 及原生互動程式全部內嵌為單一 HTML。外層提供 XD 類似的導覽與縮放；內層沙箱 iframe 使用畫板 viewportHeight，保留真實捲動／sticky／fixed 語意。畫板連結由受限 postMessage 切換內嵌頁面，不離開檢視器。`viewerRuntime`、`viewerPageBridge` 都必須是沒有外部依賴的獨立函式，正式壓縮 bundle 測試會驗證這個限制。
+
+Electron 的選擇讓 EXE 內含固定版本的渲染環境，且能沿用 TypeScript 解析／輸出模組；代價是檔案約 105 MiB。程式的 renderer 使用 HTML/CSS 是內部實作，使用者的操作入口仍是 Windows GUI。原始 XD 原型連線、Auto-Animate、覆寫等未知格式並未因桌面包裝自動取得支援；仍須依合法樣本逐項補齊。
+
+桌面安全邊界依據 [Electron security](https://www.electronjs.org/docs/latest/tutorial/security)、[context isolation](https://www.electronjs.org/docs/latest/tutorial/context-isolation) 與 [protocol API](https://www.electronjs.org/docs/latest/api/protocol)；Windows 可攜式封裝依據 [electron-builder portable](https://www.electron.build/nsis#portable)。
 
 ## 加入新格式支援的流程
 

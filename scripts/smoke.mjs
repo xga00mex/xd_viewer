@@ -1,6 +1,6 @@
 // Execute our production bundle in an in-memory DOM, never a browser or UI driver.
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { Window } from 'happy-dom';
@@ -41,6 +41,35 @@ URL.createObjectURL = (blob) => {
   return 'blob:local-smoke/' + blobs.length;
 };
 URL.revokeObjectURL = () => {};
+let completeSave;
+let completeClose;
+let menuAction;
+let workspaceSaved = '';
+const saveResult = new Promise((resolve) => {
+  completeSave = resolve;
+});
+const closeResult = new Promise((resolve) => {
+  completeClose = resolve;
+});
+window.xdDesktop = {
+  openFile: async () => null,
+  startupFile: async () => null,
+  readWorkspace: async () => null,
+  saveFile: async (name, bytes) => {
+    completeSave({ name, bytes });
+    return true;
+  },
+  writeWorkspace: async (json) => {
+    workspaceSaved = json;
+  },
+  finishClose: async () => {
+    completeClose();
+  },
+  onMenu: (listener) => {
+    menuAction = listener;
+    return () => {};
+  },
+};
 
 try {
   const index = await readFile(new URL('../dist/index.html', import.meta.url), 'utf8');
@@ -79,11 +108,54 @@ try {
     blobs.some((blob) => blob.type === 'text/html'),
     'Preview generated HTML'
   );
+  root.querySelector('[data-action="export"]').click();
+  root.querySelector('[data-action="download-export"]').click();
+  const saved = await saveResult;
+  assert(saved.name.endsWith('.html'), 'Default export is a single review HTML');
+  const html = new TextDecoder().decode(saved.bytes);
+  await mkdir(new URL('../release/', import.meta.url), { recursive: true });
+  await writeFile(new URL('../release/Demo-Review.html', import.meta.url), html);
+  const review = new Window();
+  review.document.body.innerHTML = html.match(/<body>([\s\S]*)<\/body>/)[1];
+  const reviewScript = [...review.document.scripts].find(
+    (script) => script.type !== 'application/json'
+  );
+  runInNewContext(reviewScript.textContent, { window: review, document: review.document });
+  assert.equal(review.document.getElementById('review-count').textContent, '1 / 1');
+  assert.equal(review.document.getElementById('prototype').style.height, '900px');
+  const reviewData = JSON.parse(review.document.getElementById('viewer-data').textContent);
+  const pageScript = [...reviewData.boards[0].html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1];
+  const page = new Window();
+  let navigation;
+  page.document.body.innerHTML =
+    '<button data-action="navigate" data-page="page-next.html">Next</button>';
+  runInNewContext(pageScript, {
+    window: page,
+    document: page.document,
+    KeyboardEvent: page.KeyboardEvent,
+    parent: {
+      postMessage: (message) => {
+        navigation = message;
+      },
+    },
+  });
+  page.document.querySelector('button').click();
+  assert.equal(navigation.page, 'page-next.html', 'Minified review bridge is self-contained');
+  // A settings edit immediately followed by closing must flush the debounce first.
+  root.querySelector('[data-field="hover.duration"]').value = '320';
+  root
+    .querySelector('[data-field="hover.duration"]')
+    .dispatchEvent(new window.Event('change', { bubbles: true }));
+  menuAction('app-close');
+  await closeResult;
+  assert.equal(JSON.parse(workspaceSaved).interactions['hero-button'].hover.duration, 320);
   console.log(
-    'Production smoke passed: startup, SVG scene, inspector, preview artifacts, bundled click runtime.'
+    'Production smoke passed: startup, SVG scene, inspector, native save, close flush, preview, bundled runtime and standalone HTML review.'
   );
   await window.happyDOM.abort();
   await sandbox.happyDOM.abort();
+  await review.happyDOM.abort();
+  await page.happyDOM.abort();
   process.exit(0);
 } catch (error) {
   console.error(error);

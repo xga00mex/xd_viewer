@@ -2,6 +2,7 @@ import { strToU8, zipSync } from 'fflate';
 import type { DesignDocument, DesignNode } from '../core/model';
 import { filename, safeId } from '../core/escape';
 import { renderAsset } from '../render/svg';
+import { desktop } from '../platform/desktop';
 
 export interface AssetOptions {
   format: 'svg' | 'png';
@@ -61,7 +62,17 @@ export async function exportAssets(
     mime: 'application/zip',
   };
 }
-export function download(bytes: Uint8Array | string, name: string, mime: string) {
+export async function download(
+  bytes: Uint8Array | string,
+  name: string,
+  mime: string
+): Promise<boolean> {
+  const native = desktop();
+  if (native) {
+    const data =
+      typeof bytes === 'string' ? new TextEncoder().encode(bytes) : new Uint8Array(bytes);
+    return native.saveFile(name, data.buffer);
+  }
   const blob = new Blob([typeof bytes === 'string' ? bytes : new Uint8Array(bytes)], {
       type: mime,
     }),
@@ -73,4 +84,5 @@ export function download(bytes: Uint8Array | string, name: string, mime: string)
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
+  return true;
 }

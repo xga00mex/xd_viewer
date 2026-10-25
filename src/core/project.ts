@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { DesignNode, Project } from './model';
+import { desktop } from '../platform/desktop';
 
 const number = z.number().finite().min(-1e7).max(1e7),
   positive = number.nonnegative();
@@ -235,6 +236,11 @@ function database(): Promise<IDBDatabase> {
   });
 }
 export async function saveLocal(project: Project): Promise<void> {
+  const native = desktop();
+  if (native) {
+    await native.writeWorkspace(serializeProject(project));
+    return;
+  }
   const db = await database();
   try {
     await new Promise<void>((resolve, reject) => {
@@ -249,6 +255,11 @@ export async function saveLocal(project: Project): Promise<void> {
   }
 }
 export async function restoreLocal(): Promise<Project | undefined> {
+  const native = desktop();
+  if (native) {
+    const json = await native.readWorkspace();
+    return json ? parseProject(json) : undefined;
+  }
   const db = await database();
   try {
     return await new Promise((resolve, reject) => {
