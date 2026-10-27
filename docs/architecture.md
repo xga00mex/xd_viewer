@@ -10,7 +10,7 @@
 
 - `bounds` 位於圖層本身的座標空間；`transform` 是相對父圖層的 affine matrix。
 - 群組 bounds 由子圖層的變形後 bounds 聯集產生。剪裁群組使用剪裁框邊界。
-- 畫板在文件中的外部偏移不參與畫板內部渲染；每個畫板原點歸零。
+- 畫板在文件中的外部偏移不參與畫板內部渲染；每個畫板原點歸零。直屬子圖層優先使用 `meta.ux.localTransform`，缺少時從 transform 扣除畫板 metadata 的 x/y；巢狀子圖層維持父層座標，不重複扣除。
 - `worldBounds` 遞迴乘矩陣，用於量測與選取，不能只累加 tx/ty。
 - 匯出 HTML 將 bounds 的原點吸收到 wrapper 的 left/top；保留 a/b/c/d 變形及 transform-origin 0 0。
 - SVG 剪裁幾何必須直接放在 clipPath 下；群組轉換需先合成，避免 `<g>` 導致剪裁內容消失。
@@ -19,7 +19,9 @@
 ## 邊界與防護
 
 - `parser/xd.ts` 是唯一允許動態 AGC wire shape 的區域。新增格式支援應在 adapter 正規化，不能把 raw AGC 欄位散落到 UI。
+- 元件來源先索引 shared symbols（包括 `resources.meta.ux.symbols`）、狀態及複合圖形的編輯子圖層，再索引畫板。`syncSourceGuid` 以來源 ID 展開，`guid` 作為實例 ID；物件欄位遞迴繼承，陣列使用已儲存的實例內容。保留循環／深度／數量限制。複合圖形僅繪製已保存的結果路徑，編輯用 operands 不另行繪製。
 - 封裝先檢查數量、大小與路徑；只讀 ZIP 內的資源，不存取 pattern.href 的外部網址或本機路徑。
+- 圖片以封裝內完整資源路徑作為 ID，UID／manifest ID／檔名為別名。只在別名唯一時解析；優先 UID，失效時可改查 href 對應的封裝資源。所有來源仍限於已解壓的封裝內容。
 - 工作檔透過 Zod 驗證，限定數值、列舉、顏色與內嵌點陣圖格式；禁止任意 HTML、JS、CSS 與外部 URL。
 - 圖層名稱、文字與屬性均使用對應的 HTML/XML/CSS escaping；輸出類別固定加英文字首，不能讓數字開頭的圖層名變成無效 selector。
 - 互動只接受預先定義的行為，沒有自訂程式碼輸入。預覽 iframe 僅允許 scripts，沒有 same-origin；父層僅接受目前 iframe 發出的已知畫板導覽訊息。

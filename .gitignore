@@ -4,5 +4,6 @@ desktop-dist/
 release/
 coverage/
 .cache/
+.codex-attachments/
 *.log
 .DS_Store

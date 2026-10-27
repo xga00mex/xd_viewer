@@ -76,29 +76,82 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
   const manifestBoards: Raw = {};
   function readManifest(n: Raw) {
     if (n['uxdesign#bounds'])
-      manifestBoards[str(n.path).replace('artboard-', '')] = {
+      manifestBoards[
+        str(n.path)
+          .split('/')
+          .at(-1)!
+          .replace(/^artboard-/, '')
+      ] = {
         ...obj(n['uxdesign#bounds']),
+        ...(n['uxdesign#viewport']?.height !== undefined
+          ? { viewportHeight: n['uxdesign#viewport'].height }
+          : {}),
         name: n.name,
       };
     arr(n.children).forEach((c) => readManifest(obj(c)));
   }
   readManifest(manifest);
   const assets: Record<string, Asset> = Object.create(null);
+  const assetAliases = new Map<string, string | null>();
+  const resourcePath = (value: string) => value.replace(/\\/g, '/').replace(/^(?:\.{1,2}\/)+/, '');
+  function aliasAsset(alias: string, id: string) {
+    const key = resourcePath(alias).toLowerCase();
+    if (!key) return;
+    // A basename is usable only if it identifies exactly one archive entry.
+    if (assetAliases.has(key) && assetAliases.get(key) !== id) assetAliases.set(key, null);
+    else assetAliases.set(key, id);
+  }
+  function resolveAsset(value: unknown): string | undefined {
+    const path = resourcePath(str(value)).toLowerCase();
+    return assetAliases.get(path) ?? assetAliases.get(path.split('/').at(-1)!) ?? undefined;
+  }
   for (const [path, data] of Object.entries(entries)) {
     if (!path.startsWith('resources/')) continue;
     const mime = imageMime(data);
     if (mime) {
-      const id = path.split('/').at(-1)!;
-      assets[id] = { id, name: id, mime, data: dataUrl(data, mime) };
+      const id = path.slice('resources/'.length),
+        name = path.split('/').at(-1)!;
+      assets[id] = { id, name, mime, data: dataUrl(data, mime) };
+      for (const alias of [path, id, name, name.replace(/\.(?:png|jpe?g|webp|gif)$/i, '')])
+        aliasAsset(alias, id);
     }
   }
+  function indexManifestAssets(raw: Raw, parent = '', depth = 0) {
+    if (depth > 100) throw new Error('資源清單巢狀深度超過安全上限。');
+    const path = resourcePath(str(raw.path)),
+      base = path.startsWith('resources/') ? path : [parent, path].filter(Boolean).join('/');
+    for (const component of arr(raw.components)) {
+      const id = resolveAsset([base, str(component.path)].filter(Boolean).join('/'));
+      if (id) aliasAsset(str(component.id), id);
+    }
+    arr(raw.children).forEach((child) => indexManifestAssets(obj(child), base, depth + 1));
+  }
+  indexManifestAssets(manifest);
   const symbols = new Map<string, Raw>();
+  const sources = new Map<string, Raw>();
+  let sourceCount = 0;
+  function indexSource(raw: Raw, depth = 0) {
+    if (depth > 100 || ++sourceCount > 50000)
+      throw new Error('元件定義數量或巢狀深度超過安全上限。');
+    const id = str(raw.id ?? raw.guid);
+    if (id && !sources.has(id)) sources.set(id, raw);
+    const children = raw.children ?? raw[raw.type]?.children ?? raw.group?.children;
+    arr(children).forEach((child) => indexSource(obj(child), depth + 1));
+    arr(raw.meta?.ux?.states).forEach((state) => indexSource(obj(state), depth + 1));
+  }
   const shared: Raw = { gradients: Object.create(null), clipPaths: Object.create(null) };
   for (const agc of Object.values(agcs))
     for (const key of ['gradients', 'clipPaths'])
       Object.assign(shared[key], obj(agc.resources?.[key]));
+  for (const agc of Object.values(agcs)) {
+    const definitions = [...arr(agc.resources?.symbols), ...arr(agc.resources?.meta?.ux?.symbols)];
+    for (const symbol of definitions) {
+      symbols.set(str(symbol.id), obj(symbol));
+      indexSource(obj(symbol));
+    }
+  }
   for (const agc of Object.values(agcs))
-    for (const symbol of arr(agc.resources?.symbols)) symbols.set(str(symbol.id), obj(symbol));
+    arr(agc.children).forEach((child) => indexSource(obj(child)));
   let sequence = 0;
   const used = new Set<string>();
   const warn = (code: string, message: string, nodeId?: string) => {
@@ -111,9 +164,12 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
     if (p.type === 'pattern') {
       const pattern = obj(p.pattern),
         ux = obj(pattern.meta?.ux);
-      const assetId = str(ux.uid || pattern.href?.split('/').at(-1));
+      const assetId =
+        resolveAsset(ux.uid) ?? resolveAsset(pattern.href) ?? str(ux.uid || pattern.href);
       if (!assets[assetId])
         warn('missing-image', `找不到內嵌圖片 ${assetId || '（無識別碼）'}，以佔位色呈現。`, id);
+      if (num(ux.offsetX) || num(ux.offsetY) || num(ux.scale, 1) !== 1)
+        warn('image-crop', '圖片含自訂縮放／裁切，目前以置中填滿近似呈現。', id);
       return {
         type: 'image',
         assetId,
@@ -134,7 +190,11 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
     }
     if (p.type === 'gradient') {
       const definition = obj(p.gradient),
-        g = { ...obj(shared.gradients[definition.ref]), ...definition },
+        g = {
+          ...obj(shared.gradients[definition.ref]),
+          ...obj(definition.meta?.ux?.gradientResources),
+          ...definition,
+        },
         coords = { ...g, ...obj(g.coords) };
       const type = /radial/.test(str(g.type)) ? 'radial' : 'linear';
       if (!/^(linear|radial)$/.test(str(g.type)))
@@ -259,9 +319,43 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
       estimatedBounds: !t.frame?.width,
     };
   }
+  // An instance stores only changed fields. Object fields inherit recursively;
+  // arrays (especially children) are the saved instance's complete replacement.
+  function inherit(source: Raw, override: Raw, depth = 0): Raw {
+    if (depth > 100) throw new Error('元件覆寫巢狀深度超過安全上限。');
+    const result: Raw = { ...source };
+    for (const key of Object.keys(override)) {
+      if (['__proto__', 'prototype', 'constructor'].includes(key)) continue;
+      const value = override[key];
+      result[key] =
+        value && typeof value === 'object' && !Array.isArray(value)
+          ? inherit(obj(source[key]), obj(value), depth + 1)
+          : value;
+    }
+    return result;
+  }
   function node(raw: Raw, depth = 0, chain: string[] = []): DesignNode {
     if (depth > 100 || ++sequence > 50000) throw new Error('圖層數量或巢狀深度超過安全上限。');
-    let sourceId = str(raw.id, `layer-${sequence}`),
+    if (raw.type === 'syncRef') {
+      const ref = str(raw.syncSourceGuid ?? raw.ref),
+        source = raw.syncSourceGuid ? sources.get(ref) : symbols.get(ref);
+      if (source && !chain.includes(ref)) {
+        const { type: _type, syncSourceGuid: _sync, ref: _ref, ...overrides } = raw;
+        const resolved = node(
+          { ...inherit(source, overrides), id: raw.id ?? raw.guid ?? source.id },
+          depth + 1,
+          [...chain, ref]
+        );
+        if (!raw.syncSourceGuid)
+          warn(
+            'component-override',
+            '元件已展開主元件；實例覆寫與狀態切換尚未完整支援。',
+            resolved.id
+          );
+        return resolved;
+      }
+    }
+    let sourceId = str(raw.id ?? raw.guid, `layer-${sequence}`),
       id = Object.hasOwn(Object.prototype, sourceId) ? `layer-${sourceId}` : sourceId;
     if (used.has(id)) id = `${sourceId}-${sequence}`;
     used.add(id);
@@ -289,30 +383,14 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
       children: [],
     };
     if (type === 'syncRef') {
-      const ref = str(raw.ref),
-        symbol = symbols.get(ref);
-      if (symbol && !chain.includes(ref)) {
-        const resolved = node(
-          {
-            ...symbol,
-            id: raw.id,
-            name: raw.name ?? symbol.name,
-            transform: raw.transform ?? symbol.transform,
-          },
-          depth + 1,
-          [...chain, ref]
-        );
-        warn(
-          'component-override',
-          '元件已展開主元件；實例覆寫與狀態切換尚未完整支援。',
-          resolved.id
-        );
-        return resolved;
-      }
       warn('component', '找不到元件主定義或偵測到循環參照。', id);
     }
     if (type === 'symbol') n.kind = 'group';
-    const rawChildren = arr(raw.children ?? raw[type]?.children ?? raw.group?.children);
+    // Compound operands are editing data; the saved path is the boolean result.
+    const rawChildren =
+      shape.type === 'compound' && shape.path
+        ? []
+        : arr(raw.children ?? raw[type]?.children ?? raw.group?.children);
     n.children = rawChildren.map((c) => node(obj(c), depth + 1, chain));
     const styleClip = shared.clipPaths[raw.style?.clipPath?.ref];
     if (styleClip)
@@ -322,9 +400,11 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
         chain
       );
     if (n.kind === 'artboard') {
-      const meta = obj(
-        artboardMeta[raw.artboard?.ref] ?? artboardMeta[sourceId] ?? manifestBoards[sourceId]
-      );
+      const meta = {
+        ...obj(manifestBoards[sourceId]),
+        ...obj(artboardMeta[sourceId]),
+        ...obj(artboardMeta[raw.artboard?.ref]),
+      };
       n.name = str(meta.name, n.name);
       n.bounds = {
         x: 0,
@@ -335,6 +415,16 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
       if (!meta.width && !raw.artboard?.width)
         warn('artboard-size', '缺少畫板尺寸，暫用 1440 × 900。', id);
       n.transform = identity(); // Document-space artboard offsets are not child offsets.
+      // AGC stores direct children in pasteboard space. Nested children already
+      // use their parent's space, so normalize only this boundary, exactly once.
+      n.children.forEach((child, i) => {
+        const local = obj(rawChildren[i]?.meta?.ux?.localTransform);
+        if (Object.keys(local).length) child.transform = matrix(local);
+        else {
+          child.transform[4] -= num(meta.x);
+          child.transform[5] -= num(meta.y);
+        }
+      });
       n.viewportHeight = positive(meta.viewportHeight, n.bounds.height);
       if (s.fill.type === 'none') n.style.fill = { type: 'solid', color: '#ffffff' };
     } else if (n.kind === 'group') {

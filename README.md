@@ -2,13 +2,13 @@
 
 Windows EXE 桌面版的 Adobe XD 設計稿檢視／切版工具。使用 TypeScript、Electron 與原生 DOM，提供繁體中文三欄介面。雙擊 EXE 就能工作，不需要瀏覽器、localhost 服務、Node.js 或 Adobe XD；檔案在本機解析，不上傳雲端。只有匯出的 HTML 檢視器需要用瀏覽器開啟；匯出結果不依賴 React、Vue、jQuery、npm 或 CDN。
 
-目前版本 **0.2.0 Desktop**。已使用 MIT 授權的真實 XD fixture 驗證；並非涵蓋所有 XD 版本，不支援的格式特性會顯示相容性提醒。
+目前本機建置版本 **0.2.1 Desktop**。修正多畫板座標偏移、`syncSourceGuid` 元件缺失、布林圖形重複繪製與內嵌漸層；已用 22 畫板／55 張內嵌圖片的實際文件驗證。並非涵蓋所有 XD 版本，不支援的格式特性會顯示相容性提醒。
 
 ## 啟動
 
-下載最新版：[GitHub Releases](https://github.com/xga00mex/xd_viewer/releases/latest)。在 Assets 下載 `XD-Local-0.2.0-Windows-x64.exe`，雙擊即可使用；同頁提供 SHA-256 校驗碼與 HTML 檢視範例。
+公開發佈版本見 [GitHub Releases](https://github.com/xga00mex/xd_viewer/releases/latest)，在 Assets 下載 Windows x64 EXE。0.2.1 為本機修正版，尚未上傳發佈。
 
-直接執行 `release/XD-Local-0.2.0-Windows-x64.exe`，或雙擊 `Start-XD-Local.cmd`。這是 Windows 10／11 x64 的可攜式程式，內含 Chromium 與 Node 執行環境，約 105 MiB；不另安裝執行環境。EXE 尚未使用發行者憑證簽章。
+直接執行 `release/XD-Local-0.2.1-Windows-x64.exe`，或雙擊 `Start-XD-Local.cmd`。這是 Windows 10／11 x64 的可攜式程式，內含 Chromium 與 Node 執行環境，約 105 MiB；不另安裝執行環境。EXE 尚未使用發行者憑證簽章。
 
 原始碼開發才需要 Node.js 22.12 以上（本次為 24.19）。首次下載開發與封裝套件需要網路，建置完成後可離線運作。
 
@@ -48,7 +48,8 @@ npm run dist:win  # 產生 Windows EXE
 
 - AGC 並非有完整公開規格的交換標準。目前真實 fixture 為 AGC 1.5.0；新版元件狀態／覆寫、複雜布林圖形、背景／物件模糊與部分特殊效果仍需擴充與更多樣本驗證。
 - XD 通常不內嵌字型。請載入本機字型檔，或在系統安裝原稿字型；缺字型以 Arial／sans-serif 替代，字寬可能不同。定位式文字框的寬高仍是估算值；SVG 的原始分行與基線保留。文字測距因此可能有誤差。獨立 SVG 的內嵌字型支援依開啟它的軟體而異。
-- 原始 XD 原型連線未匯入；使用本工具的互動面板重新設定。`syncRef` 目前僅基本主元件展開，會明確警告實例覆寫限制。
+- 原始 XD 原型連線未匯入；使用本工具的互動面板重新設定。已支援 `resources.meta.ux.symbols`／`resources.symbols` 與 `syncSourceGuid` 的儲存實例覆寫；即時元件狀態切換仍未匯入，舊式 `ref` 展開仍提示相容性限制。
+- 含自訂縮放／偏移的圖片裁切目前以置中填滿近似呈現，會列出可定位圖層的提醒。
 - 精準定位的文字以可編輯 SVG `text/tspan` 輸出；流式群組中的文字使用 HTML 與文字區段。已支援的剪裁群組使用 SVG clipPath 與 HTML 子節點，保留子圖層互動；未支援的節點才退回 SVG，並列出提醒。
 - 響應式需要指定版面語意。絕對定位維持原稿；整板縮放適合設計展示；Flex／Grid 適合後續維護。Sticky 需要可捲動且足夠高的父容器；帶 transform 的祖先會影響 Fixed 的定位基準。
 - 去圓角可移除向量矩形與剪裁框圓角，不能補回已烘焙在 PNG/JPEG 中的缺失像素，也不會把任意圓形改為矩形。
@@ -65,6 +66,16 @@ npm run smoke:desktop  # 執行封裝 EXE 的無視窗診斷模式
 npm run format      # 格式化原始碼
 npm run format:check
 ```
+
+可選擇用自己的 XD 檔執行完整匯入、圖片解碼、畫板渲染、工作檔往返及素材連結檢查，原稿不加入版控：
+
+```powershell
+$env:XD_TEST_FILE='E:\design\example.xd'
+$env:VISUAL_QA='1'
+npx vitest run tests/xd-file.test.ts
+```
+
+報告及各畫板檢查圖位於 `.cache/xd-verification/`。升級後請重新開啟原始 `.xd`；先前 `.xdlocal` 或自動工作階段保存的是舊版解析結果，不會自動重建。
 
 測試涵蓋真實 `.xd`（1 畫板、41 群組、178 形狀、91 文字、12 圖片）、合成格式案例、矩陣／間距、損毀或惡意封裝、工作檔驗證、SVG 經 Sharp 的像素檢查、批次素材、HTML 資源連結、互動 runtime 與 Happy DOM 介面事件。
 

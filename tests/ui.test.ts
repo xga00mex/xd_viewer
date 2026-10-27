@@ -2,6 +2,9 @@
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { Studio } from '../src/ui/app';
 import { demoProject } from '../src/demo';
+import { createProject } from '../src/core/model';
+import { parseXd } from '../src/parser/xd';
+import { multiBoardXd } from './fixtures/multi-board';
 
 vi.mock('../src/core/project', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/core/project')>()),
@@ -36,6 +39,29 @@ afterEach(() => {
 });
 
 describe('three-column local workbench DOM integration', () => {
+  it('switches repeatedly between imported artboards without dropping images or keeping the previous scene', () => {
+    app.destroy();
+    app = new Studio(document.getElementById('app')!, createProject(parseXd(multiBoardXd())));
+    for (const id of ['second', 'third', 'fourth', 'first', 'second']) {
+      const viewport = document.querySelector<HTMLElement>('#canvas-viewport')!;
+      viewport.scrollLeft = 500;
+      viewport.scrollTop = 500;
+      change('#boards', id);
+      expect(app.boardId).toBe(id);
+      expect(document.querySelector('#board-caption')?.textContent).toBe(id);
+      const stage = document.querySelector('#design-stage')!;
+      expect(stage.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 64 64');
+      expect(stage.querySelectorAll('image')).toHaveLength(1);
+      expect(stage.querySelector('image')?.getAttribute('href')).toMatch(
+        /^data:image\/png;base64,/
+      );
+      expect(stage.querySelector(`[data-node-id="${id}-image"]`)?.getAttribute('transform')).toBe(
+        'matrix(1 0 0 1 8 8)'
+      );
+      expect(viewport.scrollLeft).toBe(0);
+      expect(viewport.scrollTop).toBe(0);
+    }
+  });
   it('starts with real layers, selects the SVG node and inspects CSS', () => {
     expect(document.querySelectorAll('.panel')).toHaveLength(2);
     expect(document.querySelector('#design-stage svg')).not.toBeNull();
