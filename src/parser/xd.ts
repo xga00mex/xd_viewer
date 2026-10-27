@@ -276,11 +276,32 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
     const value = str(t.rawText ?? t.text),
       size = positive(f.size, 16),
       family = str(f.family, 'sans-serif');
-    const lines = arr(t.paragraphs).flatMap((p) =>
-      arr(p.lines).flatMap((line) =>
-        arr(line).map((s) => ({ from: num(s.from), to: num(s.to), x: num(s.x), y: num(s.y) }))
-      )
-    );
+    const lines: TextData['lines'] = [];
+    for (const paragraph of arr(t.paragraphs))
+      for (const rawLine of arr(paragraph.lines)) {
+        let previous: TextData['lines'][number] | undefined;
+        for (const span of arr(rawLine)) {
+          const line = {
+            from: num(span.from),
+            to: num(span.to),
+            x: num(span.x),
+            y: num(span.y, previous?.y ?? 0),
+          };
+          // Style fragments without x continue the current text cursor. Keep
+          // one positioned line so SVG lays out its styled runs sequentially.
+          if (
+            previous &&
+            span.x === undefined &&
+            line.y === previous.y &&
+            line.from === previous.to
+          )
+            previous.to = line.to;
+          else {
+            lines.push(line);
+            previous = line;
+          }
+        }
+      }
     const runs: TextRun[] = [];
     let from = 0;
     for (const r of arr(ux.rangedStyles)) {

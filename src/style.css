@@ -491,6 +491,8 @@ button.icon-button:hover {
   scrollbar-color: #3e424a #1b1d21;
   scrollbar-width: thin;
   overscroll-behavior: contain;
+  touch-action: none;
+  user-select: none;
 }
 .canvas-viewport.panning {
   cursor: grabbing !important;

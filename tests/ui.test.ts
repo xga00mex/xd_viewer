@@ -5,6 +5,12 @@ import { demoProject } from '../src/demo';
 import { createProject } from '../src/core/model';
 import { parseXd } from '../src/parser/xd';
 import { multiBoardXd } from './fixtures/multi-board';
+import { download } from '../src/export/assets';
+
+vi.mock('../src/export/assets', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/export/assets')>()),
+  download: vi.fn(async () => true),
+}));
 
 vi.mock('../src/core/project', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/core/project')>()),
@@ -26,6 +32,23 @@ const change = (selector: string, value: string) => {
   element.value = value;
   element.dispatchEvent(new Event('change', { bubbles: true }));
 };
+function pointerViewport() {
+  const viewport = document.querySelector<HTMLElement>('#canvas-viewport')!;
+  const captured = new Set<number>();
+  Object.defineProperty(viewport, 'setPointerCapture', {
+    value: vi.fn((id: number) => captured.add(id)),
+    configurable: true,
+  });
+  Object.defineProperty(viewport, 'hasPointerCapture', {
+    value: (id: number) => captured.has(id),
+    configurable: true,
+  });
+  Object.defineProperty(viewport, 'releasePointerCapture', {
+    value: vi.fn((id: number) => captured.delete(id)),
+    configurable: true,
+  });
+  return viewport;
+}
 beforeEach(() => {
   document.body.innerHTML = '<div id="app"></div>';
   vi.stubGlobal('requestAnimationFrame', () => 0);
@@ -39,6 +62,105 @@ afterEach(() => {
 });
 
 describe('three-column local workbench DOM integration', () => {
+  it('drags the artboard with the left mouse button without changing selection', () => {
+    app.select('card-0');
+    const viewport = pointerViewport();
+    const target = document.querySelector('[data-node-id="hero-button-bg"]')!;
+    viewport.scrollLeft = 100;
+    viewport.scrollTop = 200;
+    target.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        button: 0,
+        buttons: 1,
+        pointerId: 7,
+        clientX: 500,
+        clientY: 400,
+      })
+    );
+    viewport.dispatchEvent(
+      new PointerEvent('pointermove', {
+        bubbles: true,
+        buttons: 1,
+        pointerId: 7,
+        clientX: 450,
+        clientY: 350,
+      })
+    );
+    expect(viewport.scrollLeft).toBe(150);
+    expect(viewport.scrollTop).toBe(250);
+    viewport.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7 }));
+    viewport.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect([...app.selected]).toEqual(['card-0']);
+    expect(viewport.classList.contains('panning')).toBe(false);
+  });
+  it('keeps click selection and modifier multi-selection when the pointer only jitters', () => {
+    const viewport = pointerViewport();
+    const target = document.querySelector('[data-node-id="hero-button-bg"]')!;
+    target.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        button: 0,
+        pointerId: 7,
+        clientX: 50,
+        clientY: 50,
+      })
+    );
+    viewport.dispatchEvent(
+      new PointerEvent('pointermove', { bubbles: true, pointerId: 7, clientX: 52, clientY: 51 })
+    );
+    target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7 }));
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect([...app.selected]).toEqual(['hero-button-bg']);
+    expect(viewport.setPointerCapture).not.toHaveBeenCalled();
+    const other = document.querySelector('[data-node-id="hero-art-sun"]')!;
+    other.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 8, ctrlKey: true })
+    );
+    other.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+    expect(app.selected.has('hero-button-bg')).toBe(true);
+    expect(app.selected.has('hero-art-sun')).toBe(true);
+  });
+  it('releases middle-button panning on pointer cancellation and window blur', () => {
+    const viewport = pointerViewport();
+    viewport.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        button: 1,
+        pointerId: 7,
+        clientX: 200,
+        clientY: 200,
+      })
+    );
+    expect(viewport.classList.contains('panning')).toBe(true);
+    viewport.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 7 }));
+    expect(viewport.hasPointerCapture(7)).toBe(false);
+    expect(viewport.classList.contains('panning')).toBe(false);
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, code: 'Space', key: ' ' })
+    );
+    viewport.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 8 })
+    );
+    expect(viewport.classList.contains('panning')).toBe(true);
+    window.dispatchEvent(new Event('blur'));
+    expect(viewport.hasPointerCapture(8)).toBe(false);
+    expect(viewport.classList.contains('panning')).toBe(false);
+  });
+  it('exports multiple selected layers as one SVG when merge is checked', async () => {
+    vi.mocked(download).mockClear();
+    app.select('card-0');
+    app.select('card-1', true);
+    click('[data-action="export-assets"]');
+    click('[data-field="export.merge"]');
+    expect(document.querySelector('.selection-summary')?.textContent).toContain('單一素材');
+    click('[data-action="download-export"]');
+    await vi.waitFor(() => expect(download).toHaveBeenCalledTimes(1));
+    const [bytes, name, mime] = vi.mocked(download).mock.calls[0];
+    expect(name).toMatch(/-merged\.svg$/);
+    expect(mime).toBe('image/svg+xml');
+    expect(new TextDecoder().decode(bytes as Uint8Array)).toContain('<svg');
+  });
   it('switches repeatedly between imported artboards without dropping images or keeping the previous scene', () => {
     app.destroy();
     app = new Studio(document.getElementById('app')!, createProject(parseXd(multiBoardXd())));

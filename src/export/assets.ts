@@ -1,13 +1,14 @@
 import { strToU8, zipSync } from 'fflate';
 import type { DesignDocument, DesignNode } from '../core/model';
 import { filename, safeId } from '../core/escape';
-import { renderAsset } from '../render/svg';
+import { renderAsset, renderMergedAsset } from '../render/svg';
 import { desktop } from '../platform/desktop';
 
 export interface AssetOptions {
   format: 'svg' | 'png';
   scale: 1 | 2 | 3;
   removeRadius: boolean;
+  merge?: boolean;
 }
 export async function svgToPng(svg: string, scale = 1): Promise<Uint8Array> {
   await document.fonts.ready;
@@ -41,6 +42,16 @@ export async function exportAssets(
   options: AssetOptions
 ): Promise<{ name: string; bytes: Uint8Array; mime: string }> {
   if (!nodes.length) throw new Error('請先選取至少一個圖層。');
+  if (options.merge && nodes.length > 1) {
+    const svg = renderMergedAsset(doc, nodes, { removeRadius: options.removeRadius });
+    const bytes = options.format === 'svg' ? strToU8(svg) : await svgToPng(svg, options.scale);
+    if (bytes.byteLength > 256 * 1024 * 1024) throw new Error('匯出素材超過 256 MB，請分批匯出。');
+    return {
+      name: `${filename(doc.name)}-merged.${options.format}`,
+      bytes,
+      mime: options.format === 'svg' ? 'image/svg+xml' : 'image/png',
+    };
+  }
   const files: Record<string, Uint8Array> = {};
   let total = 0;
   for (const node of nodes) {

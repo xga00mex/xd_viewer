@@ -1,4 +1,5 @@
 import type { Bounds, DesignDocument, DesignNode, Paint } from '../core/model';
+import { emptyStyle, flatten } from '../core/model';
 import { escapeHtml as esc, safeId } from '../core/escape';
 import { identity, multiply, round, transformBounds, union } from '../core/geometry';
 import { fontRules } from '../core/fonts';
@@ -248,6 +249,52 @@ export function renderAsset(
   const content = render(copy, ctx);
   const fonts = options.embedFonts === false ? '' : fontRules(document, [node]);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.max(1, b.width + pad * 2)}" height="${Math.max(1, b.height + pad * 2)}" viewBox="${b.x - pad} ${b.y - pad} ${Math.max(1, b.width + pad * 2)} ${Math.max(1, b.height + pad * 2)}"><defs>${fonts ? `<style>${fonts}</style>` : ''}${ctx.defs.join('')}</defs>${content}</svg>`;
+}
+/** Keep the selected scene in board order, including its ancestor transforms/effects. */
+export function renderMergedAsset(
+  document: DesignDocument,
+  nodes: DesignNode[],
+  options: SvgOptions = {}
+): string {
+  if (!nodes.length) throw new Error('請先選取至少一個圖層。');
+  const selected = new Set(nodes.map((n) => n.id));
+  const board = document.artboards.find((b) => {
+    const ids = new Set(flatten([b]).map((n) => n.id));
+    return [...selected].every((id) => ids.has(id));
+  });
+  if (!board) throw new Error('合併匯出僅支援同一畫板內的圖層。');
+  function keep(n: DesignNode, includeChildren = false): DesignNode | undefined {
+    const chosen = selected.has(n.id),
+      include = includeChildren || chosen;
+    const children = n.children.flatMap((child) => {
+      const kept = keep(child, include);
+      return kept ? [kept] : [];
+    });
+    if (include) return { ...n, visible: chosen ? true : n.visible, children };
+    if (!children.length) return undefined;
+    let bounds = union(children.map((child) => transformBounds(child.bounds, child.transform)));
+    if (n.clip) {
+      const clip = transformBounds(n.clip.bounds, n.clip.transform);
+      const x = Math.max(bounds.x, clip.x),
+        y = Math.max(bounds.y, clip.y);
+      bounds = {
+        x,
+        y,
+        width: Math.max(0, Math.min(bounds.x + bounds.width, clip.x + clip.width) - x),
+        height: Math.max(0, Math.min(bounds.y + bounds.height, clip.y + clip.height) - y),
+      };
+    }
+    return {
+      ...n,
+      kind: 'group',
+      visible: true,
+      bounds,
+      children,
+      // Selecting layers does not implicitly export the artboard background.
+      style: n.kind === 'artboard' ? emptyStyle() : n.style,
+    };
+  }
+  return renderAsset(document, keep(board)!, options);
 }
 /** Render a leaf's local geometry. HTML wrappers own transform and opacity. */
 export function renderLocalSvg(document: DesignDocument, node: DesignNode): string {

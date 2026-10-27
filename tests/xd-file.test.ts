@@ -66,6 +66,12 @@ describe.skipIf(!path)('supplied XD file verification', () => {
     expect(ratios.filter((b) => b.total > 0 && b.inside === 0)).toHaveLength(0);
   });
 
+  it('keeps the mixed-style freight notice on one continuous baseline', () => {
+    const notices = flatten(doc.artboards).filter((n) => n.text?.value.includes('即可享免運優惠'));
+    expect(notices.length).toBeGreaterThan(0);
+    for (const notice of notices) expect(notice.text?.lines, notice.id).toHaveLength(1);
+  });
+
   it('rasterizes every artboard with visible content', async () => {
     mkdirSync('.cache/xd-verification', { recursive: true });
     for (const board of doc.artboards) {

@@ -21,6 +21,7 @@ import { icon } from './icons';
 import { FontRegistry, readFont, usedFonts } from '../core/fonts';
 import { desktop, nativeFile } from '../platform/desktop';
 import { exportViewer } from '../export/viewer';
+import { version } from '../../package.json';
 
 const kindLabel: Record<string, string> = {
   artboard: '畫板',
@@ -76,7 +77,15 @@ export class Studio {
   private saveRevision = 0;
   private busy = false;
   private space = false;
-  private pan?: { x: number; y: number; left: number; top: number };
+  private pan?: {
+    pointerId: number;
+    x: number;
+    y: number;
+    left: number;
+    top: number;
+    active: boolean;
+  };
+  private suppressCanvasClick = false;
   private exportTab: 'web' | 'assets' = 'web';
   private exportMode: 'viewer' | 'code' = 'viewer';
   private unsubscribeMenu?: () => void;
@@ -126,9 +135,9 @@ export class Studio {
     this.root.innerHTML = `<header class="topbar"><div class="brand"><span class="brand-mark">xd<span>↗</span></span><div>XD Local<small>本機切版工作台</small></div></div><div class="document-name"><span id="doc-title"></span><span class="file-tag" id="source-tag"></span></div><div class="top-actions"><span class="save-state" id="save-state">完全本機運作</span>${button('help', '', 'info', 'icon-button', 'aria-label="使用說明" title="使用說明"')}${button('open', '開啟檔案', 'import', 'secondary')}${button('save', '儲存工作檔', 'save', 'secondary')}${button('export', '匯出', 'export', 'primary')}</div></header>
       <div class="workspace"><aside class="left-panel panel"><div class="panel-tabs"><button data-action="layers" class="active">${icon('layers')}圖層</button><button data-action="assets">${icon('image')}素材</button></div><div class="board-control"><label for="boards">畫板</label><select id="boards" aria-label="切換畫板"></select></div><div class="search-box">${icon('search')}<input id="layer-search" placeholder="搜尋圖層…" aria-label="搜尋圖層"/><kbd>⌕</kbd></div><div class="layer-meta"><span id="layer-count"></span>${button('select-all', '全選', undefined, 'text-button')}</div><nav id="layer-tree" aria-label="圖層樹"></nav><div class="left-footer"><span class="local-dot"></span><span>檔案留在這台電腦</span>${button('diagnostics', '', 'info', 'icon-button', 'aria-label="匯入相容性報告"')}</div></aside>
       <main class="center-panel"><div class="canvas-toolbar"><div class="mode-switch">${button('design', '檢視', 'cursor', 'active')}${button('preview', '互動預覽', 'play')}</div><div class="toolbar-spacer"></div><div id="preview-tools" hidden><select id="viewport-width" aria-label="預覽裝置寬度"><option value="375">手機 · 375</option><option value="768">平板 · 768</option><option value="1200">桌面 · 1200</option><option value="original">原始尺寸</option></select>${button('refresh-preview', '重播', undefined, 'text-button')}</div><div id="zoom-tools">${button('zoom-out', '−', undefined, 'icon-button', 'aria-label="縮小"')}<button data-action="zoom-reset" id="zoom-label">60%</button>${button('zoom-in', '+', undefined, 'icon-button', 'aria-label="放大"')}${button('fit', '', 'fit', 'icon-button', 'aria-label="符合視窗" title="符合視窗 (F)"')}</div></div>
-      <div class="canvas-viewport" id="canvas-viewport"><div class="canvas-paper" id="canvas-paper"><div id="board-caption"></div><div id="design-stage"></div><svg id="selection-overlay" xmlns="http://www.w3.org/2000/svg"></svg></div></div><div id="preview-stage" hidden><iframe title="本機互動預覽" sandbox="allow-scripts" srcdoc=""></iframe></div><div class="canvas-bottom"><span id="canvas-status">Ctrl／⌘ 多選 · Alt 測距 · 空白鍵拖曳</span><div>${button('undo', '', 'undo', 'icon-button', 'aria-label="復原" title="Ctrl+Z"')}${button('redo', '', 'redo', 'icon-button', 'aria-label="重做" title="Ctrl+Shift+Z"')}<span class="divider"></span><span id="dimensions"></span></div></div></main>
+      <div class="canvas-viewport" id="canvas-viewport"><div class="canvas-paper" id="canvas-paper"><div id="board-caption"></div><div id="design-stage"></div><svg id="selection-overlay" xmlns="http://www.w3.org/2000/svg"></svg></div></div><div id="preview-stage" hidden><iframe title="本機互動預覽" sandbox="allow-scripts" srcdoc=""></iframe></div><div class="canvas-bottom"><span id="canvas-status">左鍵拖曳畫板 · Ctrl／⌘ 多選 · Alt 測距</span><div>${button('undo', '', 'undo', 'icon-button', 'aria-label="復原" title="Ctrl+Z"')}${button('redo', '', 'redo', 'icon-button', 'aria-label="重做" title="Ctrl+Shift+Z"')}<span class="divider"></span><span id="dimensions"></span></div></div></main>
       <aside class="right-panel panel"><div class="panel-tabs inspector-tabs"><button data-action="inspect" class="active">屬性</button><button data-action="interact">互動</button><button data-action="layout">排版</button></div><div id="inspector"></div></aside></div>
-      <footer class="statusbar"><span>LOCAL FIRST <span class="status-separator">/</span> 無需 Adobe XD</span><button id="diagnostic-button" data-action="diagnostics"></button><span>v0.2.1 · Desktop</span></footer>
+      <footer class="statusbar"><span>LOCAL FIRST <span class="status-separator">/</span> 無需 Adobe XD</span><button id="diagnostic-button" data-action="diagnostics"></button><span>v${version} · Desktop</span></footer>
       <input type="file" id="file-input" accept=".xd,.xdlocal,.json" hidden /><input type="file" id="font-input" accept=".woff2,.woff,.ttf,.otf" hidden /><div id="toast" role="status" aria-live="polite" hidden></div><div id="drop-overlay" hidden>${icon('import', 48)}<strong>放開以匯入設計稿</strong><span>.xd 或 .xdlocal 工作檔</span></div><div id="busy-overlay" hidden><span class="spinner"></span><strong id="busy-label">正在解析設計稿…</strong><span>所有處理都在本機進行</span></div><dialog id="modal"></dialog>`;
   }
   private bind() {
@@ -149,6 +158,11 @@ export class Studio {
       'click',
       (event) => {
         const target = event.target as Element;
+        if (this.suppressCanvasClick && target.closest('#canvas-viewport')) {
+          this.suppressCanvasClick = false;
+          event.preventDefault();
+          return;
+        }
         const action = target.closest<HTMLElement>('[data-action]');
         if (action) {
           void this.action(action.dataset.action!, action);
@@ -227,14 +241,26 @@ export class Studio {
     viewport.addEventListener(
       'pointerdown',
       (event) => {
-        if (this.space || event.button === 1) {
+        if (this.pan || (event.button !== 0 && event.button !== 1)) return;
+        this.suppressCanvasClick = false;
+        if (
+          event.button === 0 &&
+          !this.space &&
+          (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey)
+        )
+          return;
+        const active = this.space || event.button === 1;
+        this.pan = {
+          pointerId: event.pointerId,
+          x: event.clientX,
+          y: event.clientY,
+          left: viewport.scrollLeft,
+          top: viewport.scrollTop,
+          active,
+        };
+        if (active) {
           event.preventDefault();
-          this.pan = {
-            x: event.clientX,
-            y: event.clientY,
-            left: viewport.scrollLeft,
-            top: viewport.scrollTop,
-          };
+          this.suppressCanvasClick = true;
           viewport.setPointerCapture(event.pointerId);
           viewport.classList.add('panning');
         }
@@ -245,6 +271,15 @@ export class Studio {
       'pointermove',
       (event) => {
         if (this.pan) {
+          if (event.pointerId !== this.pan.pointerId) return;
+          if (!this.pan.active) {
+            if (Math.hypot(event.clientX - this.pan.x, event.clientY - this.pan.y) < 4) return;
+            this.pan.active = true;
+            this.suppressCanvasClick = true;
+            viewport.setPointerCapture(event.pointerId);
+            viewport.classList.add('panning');
+          }
+          event.preventDefault();
           viewport.scrollLeft = this.pan.left - (event.clientX - this.pan.x);
           viewport.scrollTop = this.pan.top - (event.clientY - this.pan.y);
           return;
@@ -256,15 +291,23 @@ export class Studio {
       },
       { signal }
     );
+    for (const type of ['pointerup', 'pointercancel', 'lostpointercapture'])
+      viewport.addEventListener(
+        type,
+        (event) => {
+          if (this.pan?.pointerId === (event as PointerEvent).pointerId) this.finishPan();
+        },
+        { signal }
+      );
     viewport.addEventListener(
-      'pointerup',
+      'pointerleave',
       () => {
-        this.pan = undefined;
-        viewport.classList.remove('panning');
+        if (this.pan && !this.pan.active) this.finishPan();
+        this.renderSelection();
       },
       { signal }
     );
-    viewport.addEventListener('pointerleave', () => this.renderSelection(), { signal });
+    viewport.addEventListener('dragstart', (event) => event.preventDefault(), { signal });
     window.addEventListener('keydown', (event) => this.keydown(event), { signal });
     window.addEventListener(
       'keyup',
@@ -278,7 +321,7 @@ export class Studio {
       'blur',
       () => {
         this.space = false;
-        this.pan = undefined;
+        this.finishPan();
       },
       { signal }
     );
@@ -342,6 +385,14 @@ export class Studio {
       },
       { signal }
     );
+  }
+  private finishPan() {
+    const pan = this.pan,
+      viewport = this.el('#canvas-viewport');
+    this.pan = undefined;
+    viewport.classList.remove('panning');
+    if (pan?.active && viewport.hasPointerCapture(pan.pointerId))
+      viewport.releasePointerCapture(pan.pointerId);
   }
   private keydown(event: KeyboardEvent) {
     if (this.el<HTMLDialogElement>('#modal').open) return;
@@ -691,8 +742,8 @@ export class Studio {
         `間距 ↔ ${round(gap.horizontal)} px   ↕ ${round(gap.vertical)} px  ·  位置差 ${round(gap.deltaX)}, ${round(gap.deltaY)}`;
     } else
       this.el('#canvas-status').textContent = this.selected.size
-        ? `已選取 ${this.selected.size} 個圖層 · Ctrl／⌘ 多選 · Alt 測距`
-        : 'Ctrl／⌘ 多選 · Alt 測距 · 空白鍵拖曳';
+        ? `已選取 ${this.selected.size} 個圖層 · 左鍵拖曳畫板 · Ctrl／⌘ 多選`
+        : '左鍵拖曳畫板 · Ctrl／⌘ 多選 · Alt 測距';
     overlay.innerHTML = content;
   }
   private renderInspector() {
@@ -875,7 +926,11 @@ export class Studio {
       if (field === 'format') this.assetOptions.format = value as AssetOptions['format'];
       else if (field === 'scale') this.assetOptions.scale = Number(value) as 1 | 2 | 3;
       else if (field === 'removeRadius') this.assetOptions.removeRadius = checked;
-      else if (field === 'responsive') this.webOptions.responsive = checked;
+      else if (field === 'merge') {
+        this.assetOptions.merge = checked;
+        this.exportDialog();
+        return;
+      } else if (field === 'responsive') this.webOptions.responsive = checked;
       else if (field === 'scaleArtboard') this.webOptions.scaleArtboard = checked;
       else if (field === 'breakpoint')
         this.webOptions.breakpoint = Math.max(320, Math.min(1600, Number(value) || 768));
@@ -1055,7 +1110,7 @@ export class Studio {
         '從設計稿，到可維護的網頁',
         '完全本機 · 無雲端上傳 · 無 Adobe XD 執行依賴'
       ) +
-        `<div class="modal-body help-content"><ol><li><strong>開啟 .xd</strong><p>拖入本機 XD 檔。解析後可切換畫板，並查看相容性提醒。</p></li><li><strong>檢查與量測</strong><p>點選圖層；Ctrl／⌘ 或 Shift 多選，選兩個元素量測間距。Alt 懸停可臨時比較；空白鍵拖曳平移。</p></li><li><strong>互動與響應式</strong><p>右側設定 Click、Hover、Scroll、Sticky、Fixed、Animation。排版面板指定 Flex、Grid 與約束，再在互動預覽切換裝置。</p></li><li><strong>匯出與保存</strong><p>匯出 PNG／SVG 支援去除圓角；多選打包 ZIP。網頁匯出包含 HTML、CSS、JS 與素材，可直接本機開啟。工作檔使用 .xdlocal，不覆寫原始 XD。</p></li></ol><div class="shortcut-grid"><span>Ctrl / ⌘ + O</span><span>開啟</span><span>Ctrl / ⌘ + S</span><span>儲存工作檔</span><span>Ctrl / ⌘ + Z</span><span>復原設定</span><span>+ / − / 0 / F</span><span>縮放 / 100% / 符合視窗</span></div><p class="hint">本機字型缺失會影響外觀。定位式文字框為估算值；SVG 保留原始文字基線。去圓角無法補回已烘焙進點陣圖的透明像素。</p>${button('demo', '載入範例文件', 'layers', 'secondary full-width')}<p class="hint">載入範例會替換目前工作階段；可先儲存 .xdlocal。</p></div>`
+        `<div class="modal-body help-content"><ol><li><strong>開啟 .xd</strong><p>拖入本機 XD 檔。解析後可切換畫板，並查看相容性提醒。</p></li><li><strong>檢查與量測</strong><p>點選圖層；Ctrl／⌘ 或 Shift 多選，選兩個元素量測間距。Alt 懸停可臨時比較；按住滑鼠左鍵拖曳即可捲動畫板，亦支援空白鍵或中鍵拖曳。</p></li><li><strong>互動與響應式</strong><p>右側設定 Click、Hover、Scroll、Sticky、Fixed、Animation。排版面板指定 Flex、Grid 與約束，再在互動預覽切換裝置。</p></li><li><strong>匯出與保存</strong><p>匯出 PNG／SVG 支援去除圓角；多選後可勾選「合併成單一素材」保留相對位置，或個別打包 ZIP。網頁匯出包含 HTML、CSS、JS 與素材，可直接本機開啟。工作檔使用 .xdlocal，不覆寫原始 XD。</p></li></ol><div class="shortcut-grid"><span>Ctrl / ⌘ + O</span><span>開啟</span><span>Ctrl / ⌘ + S</span><span>儲存工作檔</span><span>Ctrl / ⌘ + Z</span><span>復原設定</span><span>+ / − / 0 / F</span><span>縮放 / 100% / 符合視窗</span></div><p class="hint">本機字型缺失會影響外觀。定位式文字框為估算值；SVG 保留原始文字基線。去圓角無法補回已烘焙進點陣圖的透明像素。</p>${button('demo', '載入範例文件', 'layers', 'secondary full-width')}<p class="hint">載入範例會替換目前工作階段；可先儲存 .xdlocal。</p></div>`
     );
   }
   private exportDialog() {
@@ -1073,7 +1128,7 @@ export class Studio {
                 ['viewer', 'HTML 檢視器 · 保留設計與互動'],
                 ['code', 'HTML / CSS / JS 原始碼 ZIP'],
               ])}${this.exportMode === 'viewer' ? '<div class="export-summary"><span class="file-badge">單一 HTML</span><span>所有畫板、素材與字型都在檔案內</span></div><p class="hint">模擬 XD 網頁檢視：畫板導覽、縮放、全螢幕、熱區提示與互動播放。保留原始畫板尺寸、捲動視窗與已支援效果；不會套用流式排版重排設計。</p>' : `<div class="export-summary"><span class="file-badge">HTML</span><span class="file-badge">CSS</span><span class="file-badge">JS</span><span>+ assets + design tokens</span></div><label class="checkbox-field"><input data-field="export.responsive" type="checkbox" ${this.webOptions.responsive ? 'checked' : ''}/>套用排版面板中的響應式設定</label>${numeric('export.breakpoint', '手機斷點', this.webOptions.breakpoint, 320, 1600)}<label class="checkbox-field"><input data-field="export.scaleArtboard" type="checkbox" ${this.webOptions.scaleArtboard ? 'checked' : ''}/>整張畫板等比縮小以符合視窗</label><p class="hint">等比縮小適合展示精準設計；可維護的響應式網站建議配置 Flex / Grid。未設定的元素保留原始座標。輸出 ${this.project.document.artboards.length} 個畫板頁面。</p>`}`
-            : `<p class="selection-summary">已選取 <strong>${this.selected.size}</strong> 個圖層${this.selected.size > 1 ? '，將打包為 ZIP' : ''}</p>${select(
+            : `<p class="selection-summary">已選取 <strong>${this.selected.size}</strong> 個圖層${this.selected.size > 1 ? (this.assetOptions.merge ? '，將合併為單一素材' : '，將打包為 ZIP') : ''}</p>${this.selected.size > 1 ? `<label class="checkbox-field"><input data-field="export.merge" type="checkbox" ${this.assetOptions.merge ? 'checked' : ''}/>合併成單一素材 · 保留畫板上的相對位置</label>` : ''}${select(
                 'export.format',
                 '檔案格式',
                 this.assetOptions.format,
@@ -1147,6 +1202,7 @@ export class Studio {
     this.toastTimer = setTimeout(() => (toast.hidden = true), error ? 8000 : 4000);
   }
   destroy() {
+    this.finishPan();
     this.unsubscribeMenu?.();
     this.fontRegistry.clear();
     this.abort.abort();
