@@ -2,11 +2,11 @@
 
 Windows EXE 桌面版的 Adobe XD 設計稿檢視／切版工具。使用 TypeScript、Electron 與原生 DOM，提供繁體中文三欄介面。雙擊 EXE 就能工作，不需要瀏覽器、localhost 服務、Node.js 或 Adobe XD；檔案在本機解析，不上傳雲端。只有匯出的 HTML 檢視器需要用瀏覽器開啟；匯出結果不依賴 React、Vue、jQuery、npm 或 CDN。
 
-目前本機建置版本 **0.2.1 Desktop**。修正多畫板座標偏移、`syncSourceGuid` 元件缺失、布林圖形重複繪製與內嵌漸層；已用 22 畫板／55 張內嵌圖片的實際文件驗證。並非涵蓋所有 XD 版本，不支援的格式特性會顯示相容性提醒。
+目前版本 **0.2.1 Desktop**。修正多畫板座標偏移、`syncSourceGuid` 元件缺失、布林圖形重複繪製與內嵌漸層；已用 22 畫板／55 張內嵌圖片的實際文件驗證。並非涵蓋所有 XD 版本，不支援的格式特性會顯示相容性提醒。
 
 ## 啟動
 
-公開發佈版本見 [GitHub Releases](https://github.com/xga00mex/xd_viewer/releases/latest)，在 Assets 下載 Windows x64 EXE。0.2.1 為本機修正版，尚未上傳發佈。
+下載 [0.2.1 Release](https://github.com/xga00mex/xd_viewer/releases/tag/v0.2.1)，在 Assets 選擇 `XD-Local-0.2.1-Windows-x64.exe`；同頁提供 SHA-256 校驗碼與離線 HTML 檢視範例。
 
 直接執行 `release/XD-Local-0.2.1-Windows-x64.exe`，或雙擊 `Start-XD-Local.cmd`。這是 Windows 10／11 x64 的可攜式程式，內含 Chromium 與 Node 執行環境，約 105 MiB；不另安裝執行環境。EXE 尚未使用發行者憑證簽章。
 
