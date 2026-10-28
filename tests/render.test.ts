@@ -19,7 +19,7 @@ const documentWith = (node: unknown) =>
     })
   );
 describe('SVG rendering and project boundary', () => {
-  it('keeps an opaque fixed cart above later scrolling content', async () => {
+  it('preserves an opaque fixed cart at its authored foreground position', async () => {
     const doc = documentWith({
       type: 'shape',
       id: 'cart',
@@ -32,7 +32,7 @@ describe('SVG rendering and project boundary', () => {
     content.id = 'scrolling-content';
     delete content.fixed;
     content.style.fill = { type: 'solid', color: '#ff0000' };
-    doc.artboards[0].children.push(content);
+    doc.artboards[0].children.unshift(content);
     const { data, info } = await sharp(Buffer.from(renderBoard(doc, doc.artboards[0])))
       .ensureAlpha()
       .raw()

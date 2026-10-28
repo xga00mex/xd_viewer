@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import sharp from 'sharp';
@@ -146,4 +146,80 @@ describe.skipIf(!path)('supplied XD file verification', () => {
     expect((overview.match(/class="overview-card"/g) ?? []).length).toBe(doc.artboards.length);
     expect(/(?:src|href)="(?:assets\/|styles.css|interactions.js)/.test(overview)).toBe(false);
   }, 60000);
+
+  it('mounts the largest supplied artboard in the native overview without iframe content', async () => {
+    const { Window } = await import('happy-dom');
+    const { Studio } = await import('../src/ui/app');
+    const sandbox = new Window({ settings: { handleDisabledFileLoadingAsSuccess: true } });
+    let studio: InstanceType<typeof Studio> | undefined;
+    let callback: IntersectionObserverCallback = () => {};
+    const targets: Element[] = [];
+    try {
+      for (const key of [
+        'document',
+        'navigator',
+        'HTMLElement',
+        'HTMLInputElement',
+        'HTMLSelectElement',
+        'HTMLIFrameElement',
+        'HTMLDialogElement',
+        'KeyboardEvent',
+        'Event',
+        'MouseEvent',
+        'Image',
+        'AbortController',
+      ] as const)
+        vi.stubGlobal(key, sandbox[key]);
+      vi.stubGlobal('window', sandbox);
+      vi.stubGlobal('requestAnimationFrame', () => 0);
+      vi.stubGlobal('FontFace', undefined);
+      vi.stubGlobal(
+        'IntersectionObserver',
+        class {
+          constructor(cb: IntersectionObserverCallback) {
+            callback = cb;
+          }
+          observe(element: Element) {
+            targets.push(element);
+          }
+          unobserve() {}
+          disconnect() {}
+        }
+      );
+      sandbox.document.body.innerHTML = '<div id="app"></div>';
+      studio = new Studio(
+        sandbox.document.getElementById('app')! as unknown as HTMLElement,
+        createProject(doc)
+      );
+      const overviewButton = sandbox.document.querySelector('[data-action="overview"]');
+      if (!(overviewButton instanceof sandbox.HTMLElement))
+        throw new Error('Overview button missing');
+      overviewButton.click();
+      await Promise.resolve();
+      expect(targets).toHaveLength(doc.artboards.length);
+      const largest = doc.artboards.reduce((a, b) =>
+        a.bounds.width * a.bounds.height > b.bounds.width * b.bounds.height ? a : b
+      );
+      const index = doc.artboards.indexOf(largest),
+        target = targets[index];
+      callback(
+        [{ target, isIntersecting: true }] as IntersectionObserverEntry[],
+        {} as IntersectionObserver
+      );
+      const svg = target.querySelector('svg')!;
+      expect(svg?.getAttribute('aria-label')).toBe(largest.name);
+      expect(svg?.getAttribute('viewBox')).toBe(
+        `0 0 ${largest.bounds.width} ${largest.bounds.height}`
+      );
+      expect(svg?.querySelectorAll('g').length).toBeGreaterThan(0);
+      const frame = sandbox.document.querySelector('#preview-stage iframe');
+      if (!(frame instanceof sandbox.HTMLIFrameElement)) throw new Error('Preview frame missing');
+      expect(frame.hidden).toBe(true);
+      expect(frame.srcdoc).toBe('');
+    } finally {
+      studio?.destroy();
+      await sandbox.happyDOM.abort();
+      vi.unstubAllGlobals();
+    }
+  }, 30000);
 });

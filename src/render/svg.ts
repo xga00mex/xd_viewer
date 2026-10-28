@@ -186,12 +186,9 @@ function render(n: DesignNode, ctx: Context, transform = true): string {
     }
   } else if (n.kind === 'unsupported' && !n.children.length)
     content = geometry(n, { fill: '#f5ddeb', stroke: '#b96390', 'stroke-dasharray': '4 4' }, false);
-  // XD's fixed artboard layers form the foreground above scrolling content.
-  const children =
-    n.kind === 'artboard'
-      ? [...n.children.filter((c) => !c.fixed), ...n.children.filter((c) => c.fixed)]
-      : n.children;
-  content += children.map((c) => render(c, ctx)).join('');
+  // Fixed controls scrolling behavior, not stacking. Background artwork can
+  // also be fixed, so preserve the authored order for every artboard layer.
+  content += n.children.map((c) => render(c, ctx)).join('');
   // A transparent hit target allows selecting whitespace in a text object.
   if (ctx.options.selection && n.kind === 'text')
     content += `<rect ${attrs({ ...n.bounds, fill: 'transparent' })}/>`;

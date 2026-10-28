@@ -31,7 +31,9 @@
 
 元件定義索引上限為 200,000，展開場景仍限制為 50,000 圖層。`interactions/interactions.json` 與節點的 interaction GUID 對應已儲存的雙狀態 tap 切換，`component` 保存備選節點，`stateTarget` 保存觸發目標；多狀態／Hover／Auto-Animate 不猜測近似效果。工作檔 schema 驗證備選節點的深度、數量與 ID，舊工作檔無須遷移。
 
-`fixed` 保留原稿固定圖層；HTML 輸出僅在固定祖先之外建立 fixed stacking context，避免 nested fixed 重複定位。全畫板總覽將固定圖層轉為各板內 absolute，呈現完整設計。
+`fixed` 保留原稿的捲動行為，不能改變圖層順序。固定背景與固定控制項都按原稿順序繪製；HTML 匯出不為原稿 fixed 圖層強制指定 z-index。HTML 輸出僅在固定祖先之外套用 fixed，避免 nested fixed 重複定位。離線 HTML 總覽將固定圖層轉為各板內 absolute。
+
+工作台的全畫板模式直接在主文件建立畫板卡片及共用 SVG，使用全域 FontRegistry，不使用 iframe、srcdoc 或互動頁面腳本。IntersectionObserver 以總覽捲動容器為 root，提前 400px 載入 SVG，離開模式或銷毀工作台時釋放 observer 與 DOM；缺少該 API 時直接顯示所有畫板。
 
 ## 渲染與輸出
 

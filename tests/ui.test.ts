@@ -52,6 +52,7 @@ function pointerViewport() {
 beforeEach(() => {
   document.body.innerHTML = '<div id="app"></div>';
   vi.stubGlobal('requestAnimationFrame', () => 0);
+  vi.stubGlobal('IntersectionObserver', undefined);
   app = new Studio(document.getElementById('app')!, demoProject());
 });
 afterEach(() => {
@@ -62,13 +63,55 @@ afterEach(() => {
 });
 
 describe('three-column local workbench DOM integration', () => {
+  it('loads overview artwork near the viewport and releases it when leaving overview', () => {
+    let callback: IntersectionObserverCallback = () => {};
+    const targets: Element[] = [];
+    const disconnect = vi.fn(),
+      unobserve = vi.fn();
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(cb: IntersectionObserverCallback) {
+          callback = cb;
+        }
+        observe(element: Element) {
+          targets.push(element);
+        }
+        disconnect = disconnect;
+        unobserve = unobserve;
+      }
+    );
+    app.setProject(createProject(parseXd(multiBoardXd())), false);
+    click('[data-action="overview"]');
+    expect(targets).toHaveLength(4);
+    expect(document.querySelectorAll('#overview-boards svg')).toHaveLength(0);
+    callback(
+      [{ target: targets[0], isIntersecting: true }] as IntersectionObserverEntry[],
+      {} as IntersectionObserver
+    );
+    expect(document.querySelectorAll('#overview-boards svg')).toHaveLength(1);
+    expect(unobserve).toHaveBeenCalledWith(targets[0]);
+    click('[data-action="design"]');
+    expect(disconnect).toHaveBeenCalled();
+    expect(document.querySelectorAll('#overview-boards svg')).toHaveLength(0);
+  });
+  it('displays every artboard and its drawable artwork in the full-artboard view', () => {
+    const doc = parseXd(multiBoardXd());
+    app.setProject(createProject(doc), false);
+    click('[data-action="overview"]');
+    const stage = document.querySelector<HTMLElement>('#preview-stage')!;
+    expect(stage.hidden).toBe(false);
+    for (const board of doc.artboards) {
+      const illustration = stage.querySelector(`svg[aria-label="${board.name}"]`);
+      expect(illustration, board.name).not.toBeNull();
+      expect(illustration!.querySelector('image')).not.toBeNull();
+    }
+  });
   it('opens the full-artboard page and exports all boards without a layer selection', async () => {
     app.setProject(createProject(parseXd(multiBoardXd())), false);
     app.selected.clear();
     click('[data-action="overview"]');
-    expect(document.querySelector<HTMLIFrameElement>('#preview-stage iframe')!.srcdoc).toBe(
-      '<p>Preview</p>'
-    );
+    expect(document.querySelectorAll('#overview-boards svg')).toHaveLength(4);
     expect(document.querySelector<HTMLElement>('#preview-stage')!.hidden).toBe(false);
     click('[data-action="export"]');
     click('[data-action="export-tab-assets"]');

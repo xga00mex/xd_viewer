@@ -21,7 +21,7 @@ import { icon } from './icons';
 import { FontRegistry, readFont, usedFonts, missingFonts } from '../core/fonts';
 import { desktop, nativeFile } from '../platform/desktop';
 import { exportViewer } from '../export/viewer';
-import { exportOverview, overviewBundle } from '../export/overview';
+import { exportOverview } from '../export/overview';
 import { version } from '../../package.json';
 
 const kindLabel: Record<string, string> = {
@@ -68,6 +68,8 @@ export class Studio {
   private fontRegistry = new FontRegistry();
   private unavailableFonts: string[] = [];
   private preview?: ReturnType<typeof createPreview>;
+  private overviewObserver?: IntersectionObserver;
+  private overviewDocument?: Project['document'];
   private bundle?: WebBundle;
   private viewportWidth = 1200;
   private webOptions: WebOptions = defaultWebOptions();
@@ -139,7 +141,7 @@ export class Studio {
     this.root.innerHTML = `<header class="topbar"><div class="brand"><span class="brand-mark">xd<span>↗</span></span><div>XD Local<small>本機切版工作台</small></div></div><div class="document-name"><span id="doc-title"></span><span class="file-tag" id="source-tag"></span></div><div class="top-actions"><span class="save-state" id="save-state">完全本機運作</span>${button('help', '', 'info', 'icon-button', 'aria-label="使用說明" title="使用說明"')}${button('open', '開啟檔案', 'import', 'secondary')}${button('save', '儲存工作檔', 'save', 'secondary')}${button('export', '匯出', 'export', 'primary')}</div></header>
       <div class="workspace"><aside class="left-panel panel"><div class="panel-tabs"><button data-action="layers" class="active">${icon('layers')}圖層</button><button data-action="assets">${icon('image')}素材</button></div><div class="board-control"><label for="boards">畫板</label><select id="boards" aria-label="切換畫板"></select></div><div class="search-box">${icon('search')}<input id="layer-search" placeholder="搜尋圖層…" aria-label="搜尋圖層"/><kbd>⌕</kbd></div><div class="layer-meta"><span id="layer-count"></span>${button('select-all', '全選', undefined, 'text-button')}</div><nav id="layer-tree" aria-label="圖層樹"></nav><div class="left-footer"><span class="local-dot"></span><span>檔案留在這台電腦</span>${button('diagnostics', '', 'info', 'icon-button', 'aria-label="匯入相容性報告"')}</div></aside>
       <main class="center-panel"><div class="canvas-toolbar"><div class="mode-switch">${button('design', '檢視', 'cursor', 'active')}${button('preview', '互動預覽', 'play')}${button('overview', '全畫板', 'layers')}</div><div class="toolbar-spacer"></div><div id="preview-tools" hidden><select id="viewport-width" aria-label="預覽裝置寬度"><option value="375">手機 · 375</option><option value="768">平板 · 768</option><option value="1200">桌面 · 1200</option><option value="original">原始尺寸</option></select>${button('refresh-preview', '重播', undefined, 'text-button')}</div><div id="zoom-tools">${button('zoom-out', '−', undefined, 'icon-button', 'aria-label="縮小"')}<button data-action="zoom-reset" id="zoom-label">60%</button>${button('zoom-in', '+', undefined, 'icon-button', 'aria-label="放大"')}${button('fit', '', 'fit', 'icon-button', 'aria-label="符合視窗" title="符合視窗 (F)"')}</div></div>
-      <div class="canvas-viewport" id="canvas-viewport"><div class="canvas-paper" id="canvas-paper"><div id="board-caption"></div><div id="design-stage"></div><svg id="selection-overlay" xmlns="http://www.w3.org/2000/svg"></svg></div></div><div id="preview-stage" hidden><iframe title="本機互動預覽" sandbox="allow-scripts" srcdoc=""></iframe></div><div class="canvas-bottom"><span id="canvas-status">左鍵拖曳畫板 · Ctrl／⌘ 多選 · Alt 測距</span><div>${button('undo', '', 'undo', 'icon-button', 'aria-label="復原" title="Ctrl+Z"')}${button('redo', '', 'redo', 'icon-button', 'aria-label="重做" title="Ctrl+Shift+Z"')}<span class="divider"></span><span id="dimensions"></span></div></div></main>
+      <div class="canvas-viewport" id="canvas-viewport"><div class="canvas-paper" id="canvas-paper"><div id="board-caption"></div><div id="design-stage"></div><svg id="selection-overlay" xmlns="http://www.w3.org/2000/svg"></svg></div></div><div id="preview-stage" hidden><div id="overview-boards" hidden></div><iframe title="本機互動預覽" sandbox="allow-scripts" srcdoc=""></iframe></div><div class="canvas-bottom"><span id="canvas-status">左鍵拖曳畫板 · Ctrl／⌘ 多選 · Alt 測距</span><div>${button('undo', '', 'undo', 'icon-button', 'aria-label="復原" title="Ctrl+Z"')}${button('redo', '', 'redo', 'icon-button', 'aria-label="重做" title="Ctrl+Shift+Z"')}<span class="divider"></span><span id="dimensions"></span></div></div></main>
       <aside class="right-panel panel"><div class="panel-tabs inspector-tabs"><button data-action="inspect" class="active">屬性</button><button data-action="interact">互動</button><button data-action="layout">排版</button></div><div id="inspector"></div></aside></div>
       <footer class="statusbar"><span>LOCAL FIRST <span class="status-separator">/</span> 無需 Adobe XD</span><button id="diagnostic-button" data-action="diagnostics"></button><span>v${version} · Desktop</span></footer>
       <input type="file" id="file-input" accept=".xd,.xdlocal,.json" hidden /><input type="file" id="font-input" accept=".woff2,.woff,.ttf,.otf" hidden /><div id="toast" role="status" aria-live="polite" hidden></div><div id="drop-overlay" hidden>${icon('import', 48)}<strong>放開以匯入設計稿</strong><span>.xd 或 .xdlocal 工作檔</span></div><div id="busy-overlay" hidden><span class="spinner"></span><strong id="busy-label">正在解析設計稿…</strong><span>所有處理都在本機進行</span></div><dialog id="modal"></dialog>`;
@@ -1055,6 +1057,12 @@ export class Studio {
     this.el('[data-action="design"]').classList.toggle('active', !preview);
     this.el('[data-action="preview"]').classList.toggle('active', this.mode === 'preview');
     this.el('[data-action="overview"]').classList.toggle('active', this.mode === 'overview');
+    if (this.mode !== 'overview') {
+      this.overviewObserver?.disconnect();
+      this.overviewObserver = undefined;
+      this.overviewDocument = undefined;
+      this.el('#overview-boards').replaceChildren();
+    }
     if (preview) this.renderPreview();
     else {
       this.preview?.dispose();
@@ -1066,15 +1074,20 @@ export class Studio {
   private renderPreview() {
     try {
       this.preview?.dispose();
-      this.bundle =
-        this.mode === 'overview'
-          ? overviewBundle(this.project)
-          : exportWeb(this.project, this.webOptions);
-      this.preview = createPreview(
-        this.bundle,
-        this.mode === 'overview' ? 'overview' : this.boardId
-      );
       const frame = this.el<HTMLIFrameElement>('iframe');
+      const overview = this.mode === 'overview';
+      frame.hidden = overview;
+      this.el('#overview-boards').hidden = !overview;
+      if (overview) {
+        this.preview = undefined;
+        frame.srcdoc = '';
+        frame.removeAttribute('src');
+        this.renderOverview();
+        this.el('#canvas-status').textContent = '全畫板單頁預覽 · 顯示所有完整畫板';
+        return;
+      }
+      this.bundle = exportWeb(this.project, this.webOptions);
+      this.preview = createPreview(this.bundle, this.boardId);
       frame.removeAttribute('src');
       frame.srcdoc = this.preview.html;
       this.resizePreview();
@@ -1084,6 +1097,40 @@ export class Studio {
           : '互動預覽 · 修改右側設定即可更新';
     } catch (error) {
       this.toast('預覽失敗：' + (error instanceof Error ? error.message : String(error)), true);
+    }
+  }
+  private renderOverview() {
+    const doc = this.project.document,
+      host = this.el('#overview-boards');
+    if (this.overviewDocument === doc && host.childElementCount) return;
+    this.overviewObserver?.disconnect();
+    this.overviewDocument = doc;
+    host.innerHTML = doc.artboards
+      .map(
+        (board, index) =>
+          `<article class="overview-board"><h2>${esc(board.name)}<small>${board.bounds.width} × ${board.bounds.height}</small></h2><div class="overview-artwork" data-board-index="${index}" style="aspect-ratio:${Math.max(1, board.bounds.width)} / ${Math.max(1, board.bounds.height)}" aria-busy="true"></div></article>`
+      )
+      .join('');
+    const mount = (element: HTMLElement) => {
+      if (element.querySelector('svg')) return;
+      const board = doc.artboards[Number(element.dataset.boardIndex)];
+      element.innerHTML = renderBoard(doc, board, { embedFonts: false });
+      element.setAttribute('aria-busy', 'false');
+    };
+    const artworks = host.querySelectorAll<HTMLElement>('.overview-artwork');
+    if (typeof IntersectionObserver === 'undefined') artworks.forEach(mount);
+    else {
+      this.overviewObserver = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries)
+            if (entry.isIntersecting) {
+              mount(entry.target as HTMLElement);
+              this.overviewObserver?.unobserve(entry.target);
+            }
+        },
+        { root: this.el('#preview-stage'), rootMargin: '400px' }
+      );
+      artworks.forEach((element) => this.overviewObserver!.observe(element));
     }
   }
   private resizePreview() {
@@ -1259,6 +1306,7 @@ export class Studio {
     this.toastTimer = setTimeout(() => (toast.hidden = true), error ? 8000 : 4000);
   }
   destroy() {
+    this.overviewObserver?.disconnect();
     this.finishPan();
     this.unsubscribeMenu?.();
     this.fontRegistry.clear();

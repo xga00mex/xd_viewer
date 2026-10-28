@@ -84,6 +84,15 @@ try {
     root.querySelector('[data-field="hover.duration"]'),
     'Production inspector is interactive'
   );
+  root.querySelector('[data-action="overview"]').click();
+  assert(
+    root.querySelector('#overview-boards svg[role="img"]'),
+    'Production overview displays artboard artwork directly'
+  );
+  assert(
+    root.querySelector('#preview-stage iframe').hidden,
+    'Overview does not depend on iframe navigation'
+  );
   // iframe resources remain disabled. We inspect the generated artifacts directly.
   const originalError = console.error;
   console.error = (...args) => {

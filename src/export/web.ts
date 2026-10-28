@@ -120,7 +120,6 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
         position: 'fixed',
         left: `${round(world?.x ?? x)}px`,
         top: `${round(world?.y ?? y)}px`,
-        'z-index': '10',
         isolation: 'isolate',
       });
     }

@@ -584,6 +584,37 @@ button.icon-button:hover {
   box-shadow: 0 6px 30px #0006;
   max-width: none;
 }
+#overview-boards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  align-items: start;
+  gap: 24px;
+}
+.overview-board {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: white;
+}
+.overview-board h2 {
+  margin: 0;
+  padding: 12px;
+  background: #292d35;
+  color: #e3e5e9;
+  font-size: 13px;
+}
+.overview-board small {
+  display: block;
+  margin-top: 4px;
+  color: #aeb6c2;
+  font-size: 11px;
+  font-weight: normal;
+}
+.overview-artwork svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
 .inspector-tabs {
   justify-content: space-between;
   gap: 0;
