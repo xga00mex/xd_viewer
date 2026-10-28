@@ -1,6 +1,6 @@
 import type { DesignNode, Paint } from '../core/model';
-import { cssString } from '../core/escape';
 import { round } from '../core/geometry';
+import { fontStack } from '../core/fonts';
 
 export function paintCss(p: Paint): string {
   if (p.type === 'solid') return p.color;
@@ -15,7 +15,7 @@ export function appearance(node: DesignNode): Record<string, string> {
   if (node.kind === 'text' && node.text) {
     const t = node.text;
     Object.assign(style, {
-      'font-family': `${cssString(t.family)}, sans-serif`,
+      'font-family': fontStack(t.family),
       'font-size': `${t.size}px`,
       'font-weight': String(t.weight),
       'font-style': t.italic ? 'italic' : 'normal',

@@ -2,13 +2,48 @@ import type { DesignDocument, DesignNode, FontAsset } from './model';
 import { flatten } from './model';
 import { cssString, safeId } from './escape';
 import { dataUrl } from '../parser/archive';
+import fallbackData from '../../assets/fonts/NotoSansTC.woff2?inline';
+import fallbackLicense from '../../assets/fonts/OFL.txt?raw';
+
+export const fallbackFamily = 'Noto Sans TC';
+export const fontStack = (family: string) =>
+  `${cssString(family)}, ${cssString(fallbackFamily)}, sans-serif`;
+export const fallbackRule = `/* Noto Sans TC\n${fallbackLicense.replaceAll('*/', '* /')}\n*/\n@font-face { font-family: "Noto Sans TC"; src: url("${fallbackData}") format("woff2"); font-weight: 100 900; font-style: normal; font-display: block; }`;
+
+/** FontFaceSet.check alone reports true for absent system fonts. Compare actual
+ * metrics against multiple generic faces instead, without network requests. */
+export function missingFonts(
+  nodes: DesignNode[],
+  fonts: Record<string, FontAsset> = {},
+  available = systemFontAvailable
+): string[] {
+  const embedded = new Set(Object.values(fonts).map((f) => f.family));
+  return usedFonts(nodes).filter((f) => f !== fallbackFamily && !embedded.has(f) && !available(f));
+}
+function systemFontAvailable(family: string): boolean {
+  if (['serif', 'sans-serif', 'monospace', 'system-ui'].includes(family)) return true;
+  if (typeof FontFace === 'undefined') return true;
+  const ctx = document.createElement('canvas').getContext('2d');
+  if (!ctx) return false;
+  const sample = 'mmmmmmmmWWWWii123456漢字繁體';
+  return ['monospace', 'serif', 'sans-serif'].some((generic) => {
+    ctx.font = `72px ${generic}`;
+    const baseline = ctx.measureText(sample).width;
+    ctx.font = `72px ${cssString(family)}, ${generic}`;
+    return Math.abs(ctx.measureText(sample).width - baseline) > 0.01;
+  });
+}
 
 export function usedFonts(nodes: DesignNode[]): string[] {
   return [
     ...new Set(
-      flatten(nodes).flatMap((n) =>
-        n.text ? [n.text.family, ...n.text.runs.map((r) => r.family)] : []
-      )
+      flatten(nodes)
+        .flatMap((n) => (n.text ? [n.text.family, ...n.text.runs.map((r) => r.family)] : []))
+        .concat(
+          flatten(nodes).flatMap(
+            (n) => n.component?.states.flatMap((s) => usedFonts([s.node])) ?? []
+          )
+        )
     ),
   ];
 }
@@ -18,13 +53,15 @@ export function fontRules(
   paths?: Record<string, string>
 ): string {
   const families = nodes ? new Set(usedFonts(nodes)) : undefined;
-  return Object.values(document.fonts ?? {})
-    .filter((f) => !families || families.has(f.family))
-    .map(
-      (font) =>
-        `@font-face { font-family: ${cssString(font.family)}; src: url(${cssString(paths?.[font.id] ?? font.data)}); font-weight: ${font.weight}; font-style: ${font.style}; font-display: block; }`
-    )
-    .join('\n');
+  return [
+    !families || families.size ? fallbackRule : '',
+    ...Object.values(document.fonts ?? {})
+      .filter((f) => !families || families.has(f.family))
+      .map(
+        (font) =>
+          `@font-face { font-family: ${cssString(font.family)}; src: url(${cssString(paths?.[font.id] ?? font.data)}); font-weight: ${font.weight}; font-style: ${font.style}; font-display: block; }`
+      ),
+  ].join('\n');
 }
 export async function readFont(
   file: File,
@@ -69,6 +106,13 @@ export class FontRegistry {
     const version = ++this.version;
     const loaded: FontFace[] = [];
     try {
+      if (typeof FontFace !== 'undefined') {
+        const fallback = new FontFace(fallbackFamily, `url("${fallbackData}")`, {
+          weight: '100 900',
+        });
+        await fallback.load();
+        loaded.push(fallback);
+      }
       for (const font of Object.values(fonts)) {
         const face = new FontFace(font.family, `url(${cssString(font.data)})`, {
           weight: String(font.weight),

@@ -19,6 +19,28 @@ const documentWith = (node: unknown) =>
     })
   );
 describe('SVG rendering and project boundary', () => {
+  it('keeps an opaque fixed cart above later scrolling content', async () => {
+    const doc = documentWith({
+      type: 'shape',
+      id: 'cart',
+      meta: { ux: { fixed: true } },
+      shape: { type: 'rect', width: 40, height: 40 },
+      style: { fill: { type: 'solid', color: { value: { r: 255, g: 255, b: 255 } } } },
+    });
+    const cart = doc.artboards[0].children[0],
+      content = structuredClone(cart);
+    content.id = 'scrolling-content';
+    delete content.fixed;
+    content.style.fill = { type: 'solid', color: '#ff0000' };
+    doc.artboards[0].children.push(content);
+    const { data, info } = await sharp(Buffer.from(renderBoard(doc, doc.artboards[0])))
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const i = (20 * info.width + 20) * 4;
+    expect([...data.subarray(i, i + 4)]).toEqual([255, 255, 255, 255]);
+    expect(cart.style.opacity).toBe(1);
+  });
   it('removes all rounded corners for exports without changing source', async () => {
     const doc = documentWith({
       type: 'shape',

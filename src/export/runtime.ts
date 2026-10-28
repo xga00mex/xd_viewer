@@ -3,6 +3,19 @@
 export function interactionRuntime() {
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const activate = (trigger: HTMLElement) => {
+    if (trigger.dataset.xdStateTarget && !trigger.dataset.action) {
+      const component = trigger.closest<HTMLElement>('[data-xd-component]');
+      if (!component) return;
+      const states = Array.from(component.children).filter(
+        (c): c is HTMLElement => c instanceof HTMLElement && c.dataset.xdState !== undefined
+      );
+      const target = states.find((s) => s.dataset.xdState === trigger.dataset.xdStateTarget);
+      if (!target) return;
+      const next = target.hidden ? target.dataset.xdState : component.dataset.xdComponent;
+      states.forEach((s) => (s.hidden = s.dataset.xdState !== next));
+      trigger.setAttribute('aria-expanded', String(next !== component.dataset.xdComponent));
+      return;
+    }
     const target = document.getElementById(trigger.dataset.target ?? '');
     const action = trigger.dataset.action;
     if (action === 'navigate') {
@@ -12,26 +25,36 @@ export function interactionRuntime() {
     if (!target) return;
     if (action === 'toggle') {
       target.hidden = !target.hidden;
-      trigger.setAttribute('aria-expanded', String(!target.hidden));
+      document.querySelectorAll<HTMLElement>('[data-action="toggle"]').forEach((control) => {
+        if (control.dataset.target === target.id)
+          control.setAttribute('aria-expanded', String(!target.hidden));
+      });
     }
     if (action === 'scroll')
       target.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
   };
-  document.querySelectorAll<HTMLElement>('[data-action]').forEach((trigger) => {
+  const selector = '[data-action],[data-xd-state-target]';
+  document.querySelectorAll<HTMLElement>(selector).forEach((trigger) => {
     const target = document.getElementById(trigger.dataset.target ?? '');
     if (trigger.dataset.action === 'toggle' && target)
       trigger.setAttribute('aria-expanded', String(!target.hidden));
-    trigger.addEventListener('click', (event) => {
-      if ((event.target as Element).closest('[data-action]') === trigger) activate(trigger);
-    });
-    if (trigger.tagName !== 'BUTTON')
-      trigger.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          activate(trigger);
-        }
-      });
   });
+  document.onclick = (event) => {
+    const trigger = (event.target as Element).closest<HTMLElement>(selector);
+    if (trigger) activate(trigger);
+  };
+  document.onkeydown = (event) => {
+    const trigger = (event.target as Element).closest<HTMLElement>(selector);
+    if (
+      trigger &&
+      trigger.tagName !== 'BUTTON' &&
+      !event.repeat &&
+      (event.key === 'Enter' || event.key === ' ')
+    ) {
+      event.preventDefault();
+      activate(trigger);
+    }
+  };
   document.querySelectorAll<HTMLElement>('[data-reveal]').forEach((element) => {
     if (reduced || !('IntersectionObserver' in window)) return;
     element.classList.add('reveal-pending');

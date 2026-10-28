@@ -69,6 +69,25 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
   if (!Object.keys(agcs).length)
     throw new Error('找不到 graphicContent.agc；此 XD 版本或雲端文件格式尚不支援。');
   const resources = agcs['resources/graphics/graphicContent.agc'] ?? {};
+  const prototype = entries['interactions/interactions.json']
+    ? obj(readJson(entries['interactions/interactions.json'], 'interactions/interactions.json'))
+    : {};
+  const prototypeById = new Map<string, Raw>();
+  for (const list of Object.values(obj(prototype.interactions)))
+    for (const entry of arr(list)) if (entry.id) prototypeById.set(str(entry.id), obj(entry));
+  function tapState(raw: Raw): string | undefined {
+    const links = arr(raw.meta?.ux?.interactions).filter(
+      (link) => link.enabled !== false && link.valid !== false
+    );
+    const interactions = links.map(
+      (link) => link.data?.interaction ?? prototypeById.get(str(link.guid))
+    );
+    if (!links.length) interactions.push(...arr(prototype.interactions?.[raw.id ?? raw.guid]));
+    const tap = interactions.find(
+      (i) => i?.triggerEvent === 'tap' && i?.action === 'state-transition'
+    );
+    return tap?.properties?.destination ? str(tap.properties.destination) : undefined;
+  }
   const artboardMeta: Raw = { ...obj(resources.artboards) };
   for (const agc of Object.values(agcs))
     if (!agc.artboards?.href) Object.assign(artboardMeta, obj(agc.artboards));
@@ -131,7 +150,9 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
   const sources = new Map<string, Raw>();
   let sourceCount = 0;
   function indexSource(raw: Raw, depth = 0) {
-    if (depth > 100 || ++sourceCount > 50000)
+    // Saved alternate states are definitions, not expanded scene layers. Large
+    // component libraries can exceed the scene limit without rendering them all.
+    if (depth > 100 || ++sourceCount > 200000)
       throw new Error('元件定義數量或巢狀深度超過安全上限。');
     const id = str(raw.id ?? raw.guid);
     if (id && !sources.has(id)) sources.set(id, raw);
@@ -355,7 +376,7 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
     }
     return result;
   }
-  function node(raw: Raw, depth = 0, chain: string[] = []): DesignNode {
+  function node(raw: Raw, depth = 0, chain: string[] = [], includeStates = true): DesignNode {
     if (depth > 100 || ++sequence > 50000) throw new Error('圖層數量或巢狀深度超過安全上限。');
     if (raw.type === 'syncRef') {
       const ref = str(raw.syncSourceGuid ?? raw.ref),
@@ -365,7 +386,8 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
         const resolved = node(
           { ...inherit(source, overrides), id: raw.id ?? raw.guid ?? source.id },
           depth + 1,
-          [...chain, ref]
+          [...chain, ref],
+          includeStates
         );
         if (!raw.syncSourceGuid)
           warn(
@@ -402,6 +424,8 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
       style: s,
       visible: raw.visible !== false,
       children: [],
+      ...(raw.meta?.ux?.fixed ? { fixed: true } : {}),
+      ...(tapState(raw) ? { stateTarget: tapState(raw) } : {}),
     };
     if (type === 'syncRef') {
       warn('component', '找不到元件主定義或偵測到循環參照。', id);
@@ -412,7 +436,7 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
       shape.type === 'compound' && shape.path
         ? []
         : arr(raw.children ?? raw[type]?.children ?? raw.group?.children);
-    n.children = rawChildren.map((c) => node(obj(c), depth + 1, chain));
+    n.children = rawChildren.map((c) => node(obj(c), depth + 1, chain, includeStates));
     const styleClip = shared.clipPaths[raw.style?.clipPath?.ref];
     if (styleClip)
       n.clip = node(
@@ -524,6 +548,23 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
       warn('node-type', `尚未支援的圖層：${type}${shape.type ? ` / ${shape.type}` : ''}。`, id);
     }
     if (raw.meta?.ux?.repeatGrid) warn('repeat-grid', '重複格線以儲存的子圖層呈現。', id);
+    const states = arr(raw.meta?.ux?.states);
+    if (includeStates && n.kind === 'group' && states.length === 1) {
+      const state = states[0],
+        target = str(state.meta?.ux?.stateId ?? state.id);
+      const containsTap = (current: DesignNode): boolean =>
+        current.stateTarget === target || current.children.some(containsTap);
+      if (containsTap(n)) {
+        const variant = node(obj(state), depth + 1, chain, false);
+        variant.transform = identity();
+        variant.visible = true;
+        delete variant.fixed;
+        n.component = {
+          defaultState: str(raw.meta?.ux?.stateId, sourceId),
+          states: [{ id: target, node: variant }],
+        };
+      }
+    }
     return n;
   }
   const artboards: DesignNode[] = [];
@@ -540,9 +581,12 @@ export function parseXd(bytes: Uint8Array, name = '未命名.xd'): DesignDocumen
   if (Object.values(agcs).some((a) => arr(a.children).length)) {
     warn(
       'fonts',
-      '字型使用本機已安裝字型。XD 通常不內嵌字型；缺字型會影響字寬。定位式文字的尺寸是估算值，基線位置仍保留。'
+      '保留 XD 指定字型；缺少字型時提醒並回退內附的 Noto Sans TC。定位式文字尺寸為估算值，原始基線仍保留。'
     );
-    warn('prototype', '原始 XD 原型連線未匯入；請在「互動」面板設定此工具的互動。');
+    warn(
+      'prototype',
+      '支援已儲存的雙狀態點擊切換；多狀態、Hover 狀態、Auto-Animate 補間及其他原型連線尚未完整匯入，可在「互動」面板設定。'
+    );
   }
   return {
     version: 1,

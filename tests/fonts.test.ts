@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFont, fontRules, usedFonts } from '../src/core/fonts';
+import { readFont, fontRules, usedFonts, missingFonts, fontStack } from '../src/core/fonts';
 import { demoProject } from '../src/demo';
 import { exportWeb, createPreview } from '../src/export/web';
 import { renderBoard } from '../src/render/svg';
@@ -8,6 +8,18 @@ import { parseProject, serializeProject } from '../src/core/project';
 
 afterEach(() => vi.restoreAllMocks());
 describe('local fonts', () => {
+  it('preserves XD family names and reports missing system faces with an embedded TC fallback', () => {
+    const p = demoProject();
+    const n = p.document.artboards[0].children[0].children[0];
+    n.text!.family = 'Missing Design Font';
+    const missing = missingFonts(p.document.artboards, {}, (f) => f !== 'Missing Design Font');
+    expect(missing).toEqual(['Missing Design Font']);
+    expect(fontStack(n.text!.family)).toBe('"Missing Design Font", "Noto Sans TC", sans-serif');
+    const rules = fontRules(p.document);
+    expect(rules.includes('data:font/woff2;base64,')).toBe(true);
+    expect(rules.includes('font-weight: 100 900')).toBe(true);
+    expect(rules.includes('SIL OPEN FONT LICENSE')).toBe(true);
+  });
   it('detects supported font signatures and rejects arbitrary files', async () => {
     const font = await readFont(
       new File(['wOF2fixture'], 'local.woff2'),
@@ -44,7 +56,7 @@ describe('local fonts', () => {
     });
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     const preview = createPreview(bundle, 'demo-board');
-    expect(blobs.some((b) => b.type === 'font/woff2')).toBe(true);
+    expect(preview.html).toContain('data:font/woff2;base64,');
     preview.dispose();
   });
   it('embeds safe CSS in standalone SVG and lets inline SVG use registered fonts', async () => {

@@ -27,7 +27,11 @@
 - 圖層名稱、文字與屬性均使用對應的 HTML/XML/CSS escaping；輸出類別固定加英文字首，不能讓數字開頭的圖層名變成無效 selector。
 - 互動只接受預先定義的行為，沒有自訂程式碼輸入。預覽 iframe 僅允許 scripts，沒有 same-origin；父層僅接受目前 iframe 發出的已知畫板導覽訊息。
 - 桌面版透過受限 IPC 將工作檔原子寫入使用者資料目錄；瀏覽器開發模式才使用 IndexedDB。50 步 undo/redo 僅保存設定，不重複複製大型內嵌圖像。
-- 可選的 `DesignDocument.fonts` 保存使用者載入的字型。FontRegistry 管理字型載入與文件切換時的釋放；HTML 輸出字型只打包一次，獨立 SVG 僅嵌入其文字使用的字型。字型載入／移除是文件資源操作，不列入互動設定的 undo/redo。
+- 可選的 `DesignDocument.fonts` 保存使用者載入的字型。FontRegistry 管理字型載入與文件切換時的釋放；內附 Noto Sans TC 100–900 WOFF2 作為離線備援，原稿字型保持第一順位。透過跨 generic 字型的字寬比較偵測缺字型，通知與相容性報告列出名稱；HTML 輸出字型只打包一次，獨立 SVG 僅嵌入其文字使用的字型。字型載入／移除是文件資源操作，不列入互動設定的 undo/redo。
+
+元件定義索引上限為 200,000，展開場景仍限制為 50,000 圖層。`interactions/interactions.json` 與節點的 interaction GUID 對應已儲存的雙狀態 tap 切換，`component` 保存備選節點，`stateTarget` 保存觸發目標；多狀態／Hover／Auto-Animate 不猜測近似效果。工作檔 schema 驗證備選節點的深度、數量與 ID，舊工作檔無須遷移。
+
+`fixed` 保留原稿固定圖層；HTML 輸出僅在固定祖先之外建立 fixed stacking context，避免 nested fixed 重複定位。全畫板總覽將固定圖層轉為各板內 absolute，呈現完整設計。
 
 ## 渲染與輸出
 
@@ -37,7 +41,7 @@
 
 HTML 匯出以原生節點、獨立 stylesheet 與資源目錄為主。矩形保留 CSS、向量與定位文字保留 SVG、流式文字使用 HTML。剪裁群組用零尺寸 SVG 定義 clipPath，再套到 HTML 容器，保留子元素的互動與語意。
 
-預覽使用 `exportWeb` 的同一組輸出並轉換成 Blob URL。每次更新或離開預覽都回收 URL。`interactionRuntime` 必須保持獨立函式，所有依賴都放在函式內，因為它會序列化為匯出的獨立 JS。
+預覽使用 `exportWeb` 的同一組輸出，將圖片、字型與 CSS 內嵌為 iframe srcdoc；互動腳本由 Vite 的獨立 preview-entry 產物透過 app URL 載入，不在 opaque-origin 沙箱中讀取 Blob 子資源。只允許 scripts，維持父層 DOM 與 IPC 隔離。`interactionRuntime` 必須保持獨立函式，所有依賴都放在函式內，因為它會序列化為匯出的獨立 JS。
 
 ## Windows 桌面與 HTML 檢視
 

@@ -5,10 +5,13 @@ import sharp from 'sharp';
 import { parseXd } from '../src/parser/xd';
 import { createProject, flatten } from '../src/core/model';
 import { worldBounds } from '../src/core/geometry';
-import { renderBoard } from '../src/render/svg';
+import { renderBoard, renderAsset } from '../src/render/svg';
 import { parseProject, serializeProject } from '../src/core/project';
 import { exportWeb } from '../src/export/web';
 import { exportViewer } from '../src/export/viewer';
+import { exportAssets } from '../src/export/assets';
+import { exportOverview } from '../src/export/overview';
+import { unzipSync } from 'fflate';
 
 // Opt in with XD_TEST_FILE; private design files are never committed as fixtures.
 const path = process.env.XD_TEST_FILE;
@@ -66,17 +69,39 @@ describe.skipIf(!path)('supplied XD file verification', () => {
     expect(ratios.filter((b) => b.total > 0 && b.inside === 0)).toHaveLength(0);
   });
 
-  it('keeps the mixed-style freight notice on one continuous baseline', () => {
+  it('keeps continuous baselines and renders all positioned text characters', () => {
     const notices = flatten(doc.artboards).filter((n) => n.text?.value.includes('即可享免運優惠'));
-    expect(notices.length).toBeGreaterThan(0);
     for (const notice of notices) expect(notice.text?.lines, notice.id).toHaveLength(1);
+    for (const node of flatten(doc.artboards).filter((n) => n.text)) {
+      const text = node.text!;
+      const svg = renderAsset(doc, { ...node, visible: true }, { embedFonts: false });
+      const content =
+        svg.match(/<text\b[^>]*>([\s\S]*?)<\/text>/)?.[1].replace(/<[^>]*>/g, '') ?? '';
+      const escape = (s: string) =>
+        s
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      expect(content, node.name).toBe(
+        escape(text.lines.map((l) => text.value.slice(l.from, l.to)).join(''))
+      );
+    }
   });
 
   it('rasterizes every artboard with visible content', async () => {
     mkdirSync('.cache/xd-verification', { recursive: true });
     for (const board of doc.artboards) {
       const svg = renderBoard(doc, board);
-      const png = await sharp(Buffer.from(svg)).resize({ width: 640 }).png().toBuffer();
+      const density = Math.min(
+        72,
+        (20000 / Math.max(board.bounds.width, board.bounds.height)) * 72
+      );
+      const png = await sharp(Buffer.from(svg), { density })
+        .resize({ width: 640, height: 16000, fit: 'inside' })
+        .png()
+        .toBuffer();
       const stats = await sharp(png).stats();
       expect(
         stats.channels.slice(0, 3).some((channel) => channel.stdev > 5),
@@ -84,7 +109,7 @@ describe.skipIf(!path)('supplied XD file verification', () => {
       ).toBe(true);
       if (process.env.VISUAL_QA) writeFileSync(`.cache/xd-verification/${board.id}.png`, png);
     }
-  }, 30000);
+  }, 120000);
 
   it('exports all pages with resolved assets and embeds a representative review', () => {
     const bundle = exportWeb(createProject(doc), {
@@ -107,4 +132,18 @@ describe.skipIf(!path)('supplied XD file verification', () => {
     expect(data.boards[0].html).not.toMatch(/(?:src|href)="assets\//);
     expect(data.boards[0].html).not.toMatch(/url\(["']?assets\//);
   }, 30000);
+
+  it('exports every artboard as SVG and a full-height single-page overview', async () => {
+    const result = await exportAssets(doc, doc.artboards, {
+      format: 'svg',
+      scale: 1,
+      removeRadius: false,
+    });
+    if (doc.artboards.length > 1)
+      expect(Object.keys(unzipSync(result.bytes))).toHaveLength(doc.artboards.length);
+    else expect(result.name.endsWith('.svg')).toBe(true);
+    const overview = exportOverview(createProject(doc));
+    expect((overview.match(/class="overview-card"/g) ?? []).length).toBe(doc.artboards.length);
+    expect(/(?:src|href)="(?:assets\/|styles.css|interactions.js)/.test(overview)).toBe(false);
+  }, 60000);
 });

@@ -18,9 +18,10 @@ import {
 import { renderBoard } from '../render/svg';
 import { demoProject } from '../demo';
 import { icon } from './icons';
-import { FontRegistry, readFont, usedFonts } from '../core/fonts';
+import { FontRegistry, readFont, usedFonts, missingFonts } from '../core/fonts';
 import { desktop, nativeFile } from '../platform/desktop';
 import { exportViewer } from '../export/viewer';
+import { exportOverview, overviewBundle } from '../export/overview';
 import { version } from '../../package.json';
 
 const kindLabel: Record<string, string> = {
@@ -59,12 +60,13 @@ export class Studio {
   boardId: string;
   private tab: 'inspect' | 'interact' | 'layout' = 'inspect';
   private sidebarTab: 'layers' | 'assets' = 'layers';
-  private mode: 'design' | 'preview' = 'design';
+  private mode: 'design' | 'preview' | 'overview' = 'design';
   private zoom = 0.6;
   private collapsed = new Set<string>();
   private search = '';
   private history = new History();
   private fontRegistry = new FontRegistry();
+  private unavailableFonts: string[] = [];
   private preview?: ReturnType<typeof createPreview>;
   private bundle?: WebBundle;
   private viewportWidth = 1200;
@@ -87,9 +89,10 @@ export class Studio {
   };
   private suppressCanvasClick = false;
   private exportTab: 'web' | 'assets' = 'web';
-  private exportMode: 'viewer' | 'code' = 'viewer';
+  private exportMode: 'viewer' | 'code' | 'overview' = 'viewer';
   private unsubscribeMenu?: () => void;
   private assetOptions: AssetOptions = { format: 'svg', scale: 1, removeRadius: false };
+  private assetScope: 'selection' | 'all' = 'selection';
   private abort = new AbortController();
   constructor(
     private root: HTMLElement,
@@ -102,6 +105,7 @@ export class Studio {
     this.shell();
     this.bind();
     this.renderAll();
+    this.loadDocumentFonts(project);
     requestAnimationFrame(() => this.fit());
   }
   get board() {
@@ -134,7 +138,7 @@ export class Studio {
   private shell() {
     this.root.innerHTML = `<header class="topbar"><div class="brand"><span class="brand-mark">xd<span>↗</span></span><div>XD Local<small>本機切版工作台</small></div></div><div class="document-name"><span id="doc-title"></span><span class="file-tag" id="source-tag"></span></div><div class="top-actions"><span class="save-state" id="save-state">完全本機運作</span>${button('help', '', 'info', 'icon-button', 'aria-label="使用說明" title="使用說明"')}${button('open', '開啟檔案', 'import', 'secondary')}${button('save', '儲存工作檔', 'save', 'secondary')}${button('export', '匯出', 'export', 'primary')}</div></header>
       <div class="workspace"><aside class="left-panel panel"><div class="panel-tabs"><button data-action="layers" class="active">${icon('layers')}圖層</button><button data-action="assets">${icon('image')}素材</button></div><div class="board-control"><label for="boards">畫板</label><select id="boards" aria-label="切換畫板"></select></div><div class="search-box">${icon('search')}<input id="layer-search" placeholder="搜尋圖層…" aria-label="搜尋圖層"/><kbd>⌕</kbd></div><div class="layer-meta"><span id="layer-count"></span>${button('select-all', '全選', undefined, 'text-button')}</div><nav id="layer-tree" aria-label="圖層樹"></nav><div class="left-footer"><span class="local-dot"></span><span>檔案留在這台電腦</span>${button('diagnostics', '', 'info', 'icon-button', 'aria-label="匯入相容性報告"')}</div></aside>
-      <main class="center-panel"><div class="canvas-toolbar"><div class="mode-switch">${button('design', '檢視', 'cursor', 'active')}${button('preview', '互動預覽', 'play')}</div><div class="toolbar-spacer"></div><div id="preview-tools" hidden><select id="viewport-width" aria-label="預覽裝置寬度"><option value="375">手機 · 375</option><option value="768">平板 · 768</option><option value="1200">桌面 · 1200</option><option value="original">原始尺寸</option></select>${button('refresh-preview', '重播', undefined, 'text-button')}</div><div id="zoom-tools">${button('zoom-out', '−', undefined, 'icon-button', 'aria-label="縮小"')}<button data-action="zoom-reset" id="zoom-label">60%</button>${button('zoom-in', '+', undefined, 'icon-button', 'aria-label="放大"')}${button('fit', '', 'fit', 'icon-button', 'aria-label="符合視窗" title="符合視窗 (F)"')}</div></div>
+      <main class="center-panel"><div class="canvas-toolbar"><div class="mode-switch">${button('design', '檢視', 'cursor', 'active')}${button('preview', '互動預覽', 'play')}${button('overview', '全畫板', 'layers')}</div><div class="toolbar-spacer"></div><div id="preview-tools" hidden><select id="viewport-width" aria-label="預覽裝置寬度"><option value="375">手機 · 375</option><option value="768">平板 · 768</option><option value="1200">桌面 · 1200</option><option value="original">原始尺寸</option></select>${button('refresh-preview', '重播', undefined, 'text-button')}</div><div id="zoom-tools">${button('zoom-out', '−', undefined, 'icon-button', 'aria-label="縮小"')}<button data-action="zoom-reset" id="zoom-label">60%</button>${button('zoom-in', '+', undefined, 'icon-button', 'aria-label="放大"')}${button('fit', '', 'fit', 'icon-button', 'aria-label="符合視窗" title="符合視窗 (F)"')}</div></div>
       <div class="canvas-viewport" id="canvas-viewport"><div class="canvas-paper" id="canvas-paper"><div id="board-caption"></div><div id="design-stage"></div><svg id="selection-overlay" xmlns="http://www.w3.org/2000/svg"></svg></div></div><div id="preview-stage" hidden><iframe title="本機互動預覽" sandbox="allow-scripts" srcdoc=""></iframe></div><div class="canvas-bottom"><span id="canvas-status">左鍵拖曳畫板 · Ctrl／⌘ 多選 · Alt 測距</span><div>${button('undo', '', 'undo', 'icon-button', 'aria-label="復原" title="Ctrl+Z"')}${button('redo', '', 'redo', 'icon-button', 'aria-label="重做" title="Ctrl+Shift+Z"')}<span class="divider"></span><span id="dimensions"></span></div></div></main>
       <aside class="right-panel panel"><div class="panel-tabs inspector-tabs"><button data-action="inspect" class="active">屬性</button><button data-action="interact">互動</button><button data-action="layout">排版</button></div><div id="inspector"></div></aside></div>
       <footer class="statusbar"><span>LOCAL FIRST <span class="status-separator">/</span> 無需 Adobe XD</span><button id="diagnostic-button" data-action="diagnostics"></button><span>v${version} · Desktop</span></footer>
@@ -462,9 +466,11 @@ export class Studio {
         delete fonts[target.dataset.id];
         await this.fontRegistry.load(fonts);
         this.project.document.fonts = fonts;
+        this.unavailableFonts = missingFonts(this.project.document.artboards, fonts);
+        this.renderFontStatus();
         this.scheduleSave();
         this.renderCanvas();
-        if (this.mode === 'preview') this.renderPreview();
+        if (this.mode !== 'design') this.renderPreview();
         this.fontDialog();
       } else if (action === 'save') {
         const saved = await download(
@@ -502,7 +508,7 @@ export class Studio {
         this.renderTree();
         this.renderSelection();
         this.renderInspector();
-      } else if (action === 'design' || action === 'preview') {
+      } else if (action === 'design' || action === 'preview' || action === 'overview') {
         this.mode = action;
         this.renderMode();
       } else if (action === 'zoom-in') this.setZoom(this.zoom * 1.2);
@@ -574,15 +580,7 @@ export class Studio {
     this.generation++;
     this.project = project;
     this.fontRegistry.clear();
-    void this.fontRegistry
-      .load(project.document.fonts)
-      .then(() => {
-        if (this.project === project) {
-          this.renderCanvas();
-          if (this.mode === 'preview') this.renderPreview();
-        }
-      })
-      .catch((error) => this.toast(error.message, true));
+    this.loadDocumentFonts(project);
     this.boardId = project.document.artboards[0].id;
     this.selected = new Set([this.boardId]);
     this.collapsed.clear();
@@ -593,6 +591,24 @@ export class Studio {
     this.renderAll();
     this.fit();
     if (save) this.scheduleSave();
+  }
+  private loadDocumentFonts(project: Project) {
+    this.unavailableFonts = missingFonts(project.document.artboards, project.document.fonts);
+    void this.fontRegistry
+      .load(project.document.fonts)
+      .then(() => {
+        if (this.project === project) {
+          this.renderCanvas();
+          this.renderFontStatus();
+          if (this.mode !== 'design') this.renderPreview();
+          if (this.unavailableFonts.length)
+            this.toast(
+              `缺少字型：${this.unavailableFonts.join('、')}；已回退 Noto Sans TC。`,
+              true
+            );
+        }
+      })
+      .catch((error) => this.toast(error.message, true));
   }
   private changeBoard(id: string) {
     this.boardId = id;
@@ -619,15 +635,19 @@ export class Studio {
           `<option value="${esc(b.id)}" ${b.id === this.boardId ? 'selected' : ''}>${esc(b.name)}</option>`
       )
       .join('');
-    this.el('#diagnostic-button').textContent = this.project.document.diagnostics.length
-      ? `${this.project.document.diagnostics.length} 項相容性提醒`
-      : '文件已就緒';
+    this.renderFontStatus();
     this.el('#dimensions').textContent = `${this.board.bounds.width} × ${this.board.bounds.height}`;
     this.renderTree();
     this.renderCanvas();
     this.renderInspector();
     this.renderMode();
     this.updateHistory();
+  }
+  private renderFontStatus() {
+    const count = this.project.document.diagnostics.length + this.unavailableFonts.length;
+    this.el('#diagnostic-button').textContent = count
+      ? `${count} 項相容性提醒${this.unavailableFonts.length ? ' · 缺少字型' : ''}`
+      : '文件已就緒';
   }
   private visibleNodes() {
     const nodes = flatten([this.board]);
@@ -919,7 +939,12 @@ export class Studio {
     if (key.startsWith('export.')) {
       const field = key.slice(7);
       if (field === 'mode') {
-        this.exportMode = value as 'viewer' | 'code';
+        this.exportMode = value as 'viewer' | 'code' | 'overview';
+        this.exportDialog();
+        return;
+      }
+      if (field === 'scope') {
+        this.assetScope = value as 'selection' | 'all';
         this.exportDialog();
         return;
       }
@@ -934,7 +959,7 @@ export class Studio {
       else if (field === 'scaleArtboard') this.webOptions.scaleArtboard = checked;
       else if (field === 'breakpoint')
         this.webOptions.breakpoint = Math.max(320, Math.min(1600, Number(value) || 768));
-      if (this.mode === 'preview') this.renderPreview();
+      if (this.mode !== 'design') this.renderPreview();
       return;
     }
     const n = this.current;
@@ -997,7 +1022,7 @@ export class Studio {
     this.updateHistory();
     this.renderTree();
     this.scheduleSave();
-    if (this.mode === 'preview') {
+    if (this.mode !== 'design') {
       clearTimeout(this.previewTimer);
       this.previewTimer = setTimeout(() => this.renderPreview(), 200);
     }
@@ -1022,13 +1047,14 @@ export class Studio {
     }, 400);
   }
   private renderMode() {
-    const preview = this.mode === 'preview';
+    const preview = this.mode !== 'design';
     this.el('#canvas-viewport').hidden = preview;
     this.el('#preview-stage').hidden = !preview;
     this.el('#zoom-tools').hidden = preview;
-    this.el('#preview-tools').hidden = !preview;
+    this.el('#preview-tools').hidden = this.mode !== 'preview';
     this.el('[data-action="design"]').classList.toggle('active', !preview);
-    this.el('[data-action="preview"]').classList.toggle('active', preview);
+    this.el('[data-action="preview"]').classList.toggle('active', this.mode === 'preview');
+    this.el('[data-action="overview"]').classList.toggle('active', this.mode === 'overview');
     if (preview) this.renderPreview();
     else {
       this.preview?.dispose();
@@ -1040,21 +1066,29 @@ export class Studio {
   private renderPreview() {
     try {
       this.preview?.dispose();
-      this.bundle = exportWeb(this.project, this.webOptions);
-      this.preview = createPreview(this.bundle, this.boardId);
+      this.bundle =
+        this.mode === 'overview'
+          ? overviewBundle(this.project)
+          : exportWeb(this.project, this.webOptions);
+      this.preview = createPreview(
+        this.bundle,
+        this.mode === 'overview' ? 'overview' : this.boardId
+      );
       const frame = this.el<HTMLIFrameElement>('iframe');
-      frame.removeAttribute('srcdoc');
-      frame.src = this.preview.url;
+      frame.removeAttribute('src');
+      frame.srcdoc = this.preview.html;
       this.resizePreview();
       this.el('#canvas-status').textContent =
-        '互動預覽 · 修改右側設定即可更新 · 使用原生 HTML / CSS / JS';
+        this.mode === 'overview'
+          ? '全畫板單頁預覽 · 顯示所有完整畫板'
+          : '互動預覽 · 修改右側設定即可更新';
     } catch (error) {
       this.toast('預覽失敗：' + (error instanceof Error ? error.message : String(error)), true);
     }
   }
   private resizePreview() {
     const frame = this.el<HTMLIFrameElement>('iframe');
-    frame.style.width = `${this.viewportWidth}px`;
+    frame.style.width = this.mode === 'overview' ? '100%' : `${this.viewportWidth}px`;
     this.el('#preview-stage').style.setProperty('--preview-width', `${this.viewportWidth}px`);
   }
   private dialog(content: string) {
@@ -1066,7 +1100,14 @@ export class Studio {
     return `<div class="modal-heading"><div><h2>${title}</h2><p>${subtitle}</p></div>${button('close', '', 'close', 'icon-button', 'aria-label="關閉"')}</div>`;
   }
   private diagnostics() {
-    const diagnostics = this.project.document.diagnostics;
+    const diagnostics = [
+      ...this.project.document.diagnostics,
+      ...this.unavailableFonts.map((f) => ({
+        code: 'missing-font',
+        message: `缺少字型「${f}」，已回退 Noto Sans TC。`,
+        nodeId: undefined,
+      })),
+    ];
     this.dialog(
       this.modalHeading('匯入相容性報告', '精度限制會明確列出，請依設計需求檢查。') +
         `<div class="modal-body">${diagnostics.length ? `<ul class="diagnostic-list">${diagnostics.map((d) => `<li><code>${esc(d.code)}</code><p>${esc(d.message)}</p>${d.nodeId ? `<small>${esc(findNode(this.project, d.nodeId)?.name ?? d.nodeId)}</small>` : ''}</li>`).join('')}</ul>` : '<div class="empty-report">✓ 此文件目前沒有相容性提醒。</div>'}<p class="hint">本工具仍在擴充 XD 格式相容性。模糊、複雜布林運算、元件覆寫及原始原型連線可能無法完整還原；請以實際稿件驗證。</p><br/>${button('fonts', '管理本機字型', 'text', 'secondary full-width')}</div>`
@@ -1093,9 +1134,11 @@ export class Studio {
       await this.fontRegistry.load(fonts);
       if (this.project !== project) return;
       project.document.fonts = fonts;
+      this.unavailableFonts = missingFonts(project.document.artboards, fonts);
+      this.renderFontStatus();
       this.scheduleSave();
       this.renderCanvas();
-      if (this.mode === 'preview') this.renderPreview();
+      if (this.mode !== 'design') this.renderPreview();
       this.fontDialog();
       this.toast('字型已載入並加入工作檔');
     } catch (error) {
@@ -1115,6 +1158,7 @@ export class Studio {
   }
   private exportDialog() {
     const web = this.exportTab === 'web';
+    const overviewHint = '所有完整畫板並排於同一頁，可捲動檢視；保留原稿相對位置與支援的互動。';
     this.dialog(
       this.modalHeading(
         '匯出作品',
@@ -1126,9 +1170,13 @@ export class Studio {
           web
             ? `${select('export.mode', '匯出用途', this.exportMode, [
                 ['viewer', 'HTML 檢視器 · 保留設計與互動'],
+                ['overview', '全畫板單頁 HTML'],
                 ['code', 'HTML / CSS / JS 原始碼 ZIP'],
-              ])}${this.exportMode === 'viewer' ? '<div class="export-summary"><span class="file-badge">單一 HTML</span><span>所有畫板、素材與字型都在檔案內</span></div><p class="hint">模擬 XD 網頁檢視：畫板導覽、縮放、全螢幕、熱區提示與互動播放。保留原始畫板尺寸、捲動視窗與已支援效果；不會套用流式排版重排設計。</p>' : `<div class="export-summary"><span class="file-badge">HTML</span><span class="file-badge">CSS</span><span class="file-badge">JS</span><span>+ assets + design tokens</span></div><label class="checkbox-field"><input data-field="export.responsive" type="checkbox" ${this.webOptions.responsive ? 'checked' : ''}/>套用排版面板中的響應式設定</label>${numeric('export.breakpoint', '手機斷點', this.webOptions.breakpoint, 320, 1600)}<label class="checkbox-field"><input data-field="export.scaleArtboard" type="checkbox" ${this.webOptions.scaleArtboard ? 'checked' : ''}/>整張畫板等比縮小以符合視窗</label><p class="hint">等比縮小適合展示精準設計；可維護的響應式網站建議配置 Flex / Grid。未設定的元素保留原始座標。輸出 ${this.project.document.artboards.length} 個畫板頁面。</p>`}`
-            : `<p class="selection-summary">已選取 <strong>${this.selected.size}</strong> 個圖層${this.selected.size > 1 ? (this.assetOptions.merge ? '，將合併為單一素材' : '，將打包為 ZIP') : ''}</p>${this.selected.size > 1 ? `<label class="checkbox-field"><input data-field="export.merge" type="checkbox" ${this.assetOptions.merge ? 'checked' : ''}/>合併成單一素材 · 保留畫板上的相對位置</label>` : ''}${select(
+              ])}${this.exportMode === 'overview' ? `<p class="hint">${overviewHint}</p>` : this.exportMode !== 'code' ? '<div class="export-summary"><span class="file-badge">單一 HTML</span><span>所有畫板、素材與字型都在檔案內</span></div><p class="hint">模擬 XD 網頁檢視：畫板導覽、縮放、全螢幕、熱區提示與互動播放。保留原始畫板尺寸、捲動視窗與已支援效果；不會套用流式排版重排設計。</p>' : `<div class="export-summary"><span class="file-badge">HTML</span><span class="file-badge">CSS</span><span class="file-badge">JS</span><span>+ assets + design tokens</span></div><label class="checkbox-field"><input data-field="export.responsive" type="checkbox" ${this.webOptions.responsive ? 'checked' : ''}/>套用排版面板中的響應式設定</label>${numeric('export.breakpoint', '手機斷點', this.webOptions.breakpoint, 320, 1600)}<label class="checkbox-field"><input data-field="export.scaleArtboard" type="checkbox" ${this.webOptions.scaleArtboard ? 'checked' : ''}/>整張畫板等比縮小以符合視窗</label><p class="hint">等比縮小適合展示精準設計；可維護的響應式網站建議配置 Flex / Grid。未設定的元素保留原始座標。輸出 ${this.project.document.artboards.length} 個畫板頁面。</p>`}`
+            : `${select('export.scope', '匯出範圍', this.assetScope, [
+                ['selection', '目前選取圖層'],
+                ['all', '全部畫板 · 個別打包 ZIP'],
+              ])}<p class="selection-summary">${this.assetScope === 'all' ? `全部 <strong>${this.project.document.artboards.length}</strong> 個畫板，將個別打包 ZIP` : `已選取 <strong>${this.selected.size}</strong> 個圖層${this.selected.size > 1 ? (this.assetOptions.merge ? '，將合併為單一素材' : '，將打包為 ZIP') : ''}`}</p>${this.assetScope === 'selection' && this.selected.size > 1 ? `<label class="checkbox-field"><input data-field="export.merge" type="checkbox" ${this.assetOptions.merge ? 'checked' : ''}/>合併成單一素材 · 保留畫板上的相對位置</label>` : ''}${select(
                 'export.format',
                 '檔案格式',
                 this.assetOptions.format,
@@ -1141,7 +1189,7 @@ export class Studio {
                 ['2', '2× 高解析度'],
                 ['3', '3× 高解析度'],
               ])}<label class="checkbox-field"><input data-field="export.removeRadius" type="checkbox" ${this.assetOptions.removeRadius ? 'checked' : ''}/>移除矩形與遮罩的圓角</label><p class="hint">包含群組內的圓角。已烘焙進圖片本身的圓角無法還原。SVG 保留可編輯文字，開啟時需要原字型。</p>`
-        }</div><div class="modal-footer"><span>所有處理都在本機完成</span>${button('download-export', web ? (this.exportMode === 'viewer' ? '匯出 HTML 檢視' : '匯出程式碼 ZIP') : '匯出素材', 'export', 'primary', !web && !this.selected.size ? 'disabled' : '')}</div>`
+        }</div><div class="modal-footer"><span>所有處理都在本機完成</span>${button('download-export', web ? (this.exportMode === 'overview' ? '匯出全畫板 HTML' : this.exportMode === 'viewer' ? '匯出 HTML 檢視' : '匯出程式碼 ZIP') : '匯出素材', 'export', 'primary', !web && this.assetScope === 'selection' && !this.selected.size ? 'disabled' : '')}</div>`
     );
   }
   private async performExport() {
@@ -1151,10 +1199,13 @@ export class Studio {
     trigger.textContent = '正在產生…';
     try {
       if (this.exportTab === 'web') {
-        if (this.exportMode === 'viewer') {
+        if (this.exportMode !== 'code') {
           const saved = await download(
-            exportViewer(this.project),
-            filename(this.project.document.name) + '-檢視.html',
+            this.exportMode === 'overview'
+              ? exportOverview(this.project)
+              : exportViewer(this.project),
+            filename(this.project.document.name) +
+              (this.exportMode === 'overview' ? '-全畫板.html' : '-檢視.html'),
             'text/html'
           );
           if (!saved) {
@@ -1176,10 +1227,16 @@ export class Studio {
           this.toast(`已匯出網頁${bundle.warnings.length ? '；注意事項已附在 README.md' : ''}`);
         }
       } else {
-        const nodes = [...this.selected]
-          .map((id) => findNode(this.project, id))
-          .filter((n): n is DesignNode => !!n);
-        const result = await exportAssets(this.project.document, nodes, this.assetOptions);
+        const nodes =
+          this.assetScope === 'all'
+            ? this.project.document.artboards
+            : [...this.selected]
+                .map((id) => findNode(this.project, id))
+                .filter((n): n is DesignNode => !!n);
+        const result = await exportAssets(this.project.document, nodes, {
+          ...this.assetOptions,
+          merge: this.assetScope === 'selection' && this.assetOptions.merge,
+        });
         const saved = await download(result.bytes, result.name, result.mime);
         if (!saved) {
           this.exportDialog();

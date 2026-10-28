@@ -39,6 +39,19 @@ async function pixel(svg: string, x: number, y: number) {
 }
 
 describe('XD coordinates and stored component instances', () => {
+  it('separates saved state definitions from the 50,000 expanded scene-layer limit', () => {
+    const doc = parseXd(
+      archive([
+        {
+          type: 'group',
+          id: 'library',
+          group: { children: [rect('visible')] },
+          meta: { ux: { states: Array.from({ length: 50000 }, (_, i) => rect(`state-${i}`)) } },
+        },
+      ])
+    );
+    expect(flatten(doc.artboards)).toHaveLength(3);
+  });
   it('renders every offset artboard and resolves UID, Windows href, relative path and manifest images', async () => {
     const doc = parseXd(multiBoardXd());
     expect(doc.diagnostics.filter((d) => d.code === 'missing-image')).toEqual([]);

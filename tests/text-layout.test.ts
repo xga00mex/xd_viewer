@@ -3,6 +3,7 @@ import { strToU8, zipSync } from 'fflate';
 import sharp from 'sharp';
 import { parseXd } from '../src/parser/xd';
 import { renderBoard } from '../src/render/svg';
+import { renderAsset } from '../src/render/svg';
 
 function textDocument(fragmented: boolean) {
   const firstLine = fragmented
@@ -57,6 +58,16 @@ function textDocument(fragmented: boolean) {
 }
 
 describe('positioned mixed-style text', () => {
+  it('preserves every character when XD style lengths are stale after an edit', () => {
+    const doc = textDocument(false),
+      node = doc.artboards[0].children[0];
+    node.text!.value = '加入購物車 $1,280';
+    node.text!.lines = [{ from: 0, to: 12, x: 0, y: 30 }];
+    node.text!.runs = [{ ...node.text!.runs[0], from: 0, to: 4 }];
+    const svg = renderAsset(doc, node);
+    const content = svg.match(/<text\b[^>]*>([\s\S]*?)<\/text>/)![1].replace(/<[^>]*>/g, '');
+    expect(content).toBe(node.text!.value);
+  });
   it('continues fragments without x instead of restarting them at the left edge', async () => {
     const fragmented = textDocument(true),
       control = textDocument(false);

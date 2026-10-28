@@ -91,23 +91,38 @@ try {
   };
   root.querySelector('[data-action="preview"]').click();
   console.error = originalError;
-  const runtime = blobs.find((blob) => blob.type === 'text/javascript');
-  assert(runtime, 'Preview generated a standalone runtime');
-  const source = await runtime.text();
+  const preview = root.querySelector('#preview-stage iframe').srcdoc;
+  assert(preview.includes('<style>'), 'Preview embeds its CSS');
+  assert(!/(?:src|href)="blob:/.test(preview), 'Opaque preview does not fetch Blob subresources');
+  const scriptUrl = preview.match(/<script src="([^"]+)" defer>/)?.[1];
+  assert(scriptUrl, 'Preview references the packaged runtime');
+  const source = await readFile(
+    new URL('../dist' + new URL(scriptUrl).pathname, import.meta.url),
+    'utf8'
+  );
   const sandbox = new Window();
   sandbox.document.body.innerHTML =
-    '<button id="trigger" data-action="toggle" data-target="panel"></button><section id="panel" hidden></section>';
-  runInNewContext(source, { window: sandbox, document: sandbox.document });
+    '<button id="trigger" data-action="toggle" data-target="panel"></button><section id="panel" hidden></section><div id="state-trigger" data-xd-component="open" data-xd-state-target="closed"><div data-xd-state="open"></div><div id="closed-state" data-xd-state="closed" hidden></div></div>';
+  runInNewContext(source, {
+    window: sandbox,
+    document: sandbox.document,
+    KeyboardEvent: sandbox.KeyboardEvent,
+    HTMLElement: sandbox.HTMLElement,
+    parent: sandbox,
+  });
   sandbox.document.getElementById('trigger').click();
   assert.equal(
     sandbox.document.getElementById('panel').hidden,
     false,
     'Minified runtime retains all dependencies'
   );
-  assert(
-    blobs.some((blob) => blob.type === 'text/html'),
-    'Preview generated HTML'
+  sandbox.document.getElementById('state-trigger').click();
+  assert.equal(
+    sandbox.document.getElementById('closed-state').hidden,
+    false,
+    'Built runtime switches saved XD states'
   );
+  assert(preview.includes('<main'), 'Preview contains the actual design');
   root.querySelector('[data-action="export"]').click();
   root.querySelector('[data-action="download-export"]').click();
   const saved = await saveResult;

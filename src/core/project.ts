@@ -103,6 +103,11 @@ const node: z.ZodType<DesignNode> = z.lazy(() =>
     text: text.optional(),
     clip: node.optional(),
     viewportHeight: positive.optional(),
+    fixed: z.boolean().optional(),
+    stateTarget: id.optional(),
+    component: z
+      .object({ defaultState: id, states: z.array(z.object({ id, node })).max(20) })
+      .optional(),
   })
 );
 const interaction = z.object({
@@ -216,6 +221,7 @@ export function parseProject(json: string): Project {
     ids.add(n.id);
     n.children.forEach((c) => check(c, depth + 1));
     if (n.clip) check(n.clip, depth + 1);
+    n.component?.states.forEach((s) => check(s.node, depth + 1));
   }
   result.data.document.artboards.forEach((n) => {
     if (n.kind !== 'artboard') throw new Error('工作檔根節點必須是畫板。');

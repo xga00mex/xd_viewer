@@ -18,6 +18,15 @@ afterEach(() => {
 });
 
 describe('maintainable web export', () => {
+  it('gives the opaque sandbox a self-contained page without Blob subresources', () => {
+    const preview = createPreview(exportWeb(demoProject()), 'demo-board');
+    expect(preview).toHaveProperty('html');
+    const html = (preview as unknown as { html: string }).html;
+    expect(html).toContain('<style>');
+    expect(html).not.toMatch(/(?:src|href)="(?:blob:|assets\/|styles.css|interactions.js)/);
+    expect(html.includes(`id="${safeId('hero-button')}"`)).toBe(true);
+    preview.dispose();
+  });
   it('exports every referenced local asset and stable classes, no external runtime', () => {
     const p = demoProject(),
       first = exportWeb(p),
@@ -58,16 +67,12 @@ describe('maintainable web export', () => {
     expect(result.files['styles.css']).toContain('matrix(0, 1, -1, 0, 0, 0)');
     expect(result.files['styles.css']).toContain('right:');
   });
-  it('creates offline preview using revocable blobs and exports same runtime', () => {
+  it('creates offline preview with a packaged script and exports the same runtime', () => {
     const bundle = exportWeb(demoProject());
-    let i = 0;
-    const make = vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:local/${i++}`);
-    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     const preview = createPreview(bundle, 'demo-board');
-    expect(preview.url).toMatch(/^blob:local/);
+    expect(preview.html).toMatch(/<script src="http:\/\/localhost[^\"]+" defer>/);
     expect(bundle.files['interactions.js']).toBe(runtimeSource());
     preview.dispose();
-    expect(revoke).toHaveBeenCalledTimes(make.mock.calls.length);
   });
   it('does not execute untrusted layer names or text in generated markup', () => {
     const p = demoProject(),
@@ -86,24 +91,22 @@ describe('maintainable web export', () => {
   });
 });
 describe('exported interactions', () => {
+  it('handles nested toggle keyboard events once and synchronizes both controls', () => {
+    document.body.innerHTML =
+      '<div data-action="toggle" data-target="panel"><span id="inner" tabindex="0" data-action="toggle" data-target="panel"></span></div><button id="other" data-action="toggle" data-target="panel"></button><section id="panel" hidden></section>';
+    interactionRuntime();
+    document
+      .getElementById('inner')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(document.getElementById('panel')!.hidden).toBe(false);
+    expect(document.getElementById('other')!.getAttribute('aria-expanded')).toBe('true');
+  });
   it('keeps keyboard navigation inside the sandbox preview protocol', async () => {
-    const bundle = exportWeb(demoProject()),
-      blobs: Blob[] = [];
-    vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
-      if (!(blob instanceof Blob)) throw new Error('Expected Blob');
-      blobs.push(blob);
-      return 'blob:test/' + blobs.length;
-    });
-    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
-    const preview = createPreview(bundle, 'demo-board');
-    const scripts = await Promise.all(
-      blobs.filter((b) => b.type === 'text/javascript').map((b) => b.text())
-    );
-    const bridge = scripts.find((s) => s.includes('navigatePreview'))!;
     document.body.innerHTML =
       '<div id="nav" data-action="navigate" data-page="next.html" tabindex="0"></div>';
     const postMessage = vi.fn();
-    new Function('document', 'parent', bridge)(document, { postMessage });
+    vi.stubGlobal('parent', { postMessage });
+    await import('../src/export/preview-entry');
     document
       .getElementById('nav')!
       .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -111,7 +114,6 @@ describe('exported interactions', () => {
       { type: 'xd-preview-navigate', page: 'next.html' },
       '*'
     );
-    preview.dispose();
   });
   it('toggles hidden targets by click and keyboard, preserves matrix transforms', () => {
     document.body.innerHTML =

@@ -6,7 +6,8 @@ import { round, worldBounds } from '../core/geometry';
 import { appearance, declarations, paintCss } from './css';
 import { renderLocalSvg, renderAsset, htmlClipDefinition } from '../render/svg';
 import { runtimeSource } from './runtime';
-import { fontRules } from '../core/fonts';
+import { fontRules, fontStack } from '../core/fonts';
+import previewRuntimeUrl from './preview-entry.ts?worker&url';
 
 export interface WebOptions {
   responsive: boolean;
@@ -32,6 +33,7 @@ button { font: inherit; color: inherit; padding: 0; border: 0; text-align: inher
 .board-shell { margin: 0 auto; position: relative; }
 .artboard { position: relative; margin: 0 auto; isolation: isolate; }
 .design-node { margin: 0; min-width: 0; transform-origin: 0 0; }
+.component-state { position: absolute; inset: 0; }
 .visual { display: block; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 .visual svg { width: 100%; height: 100%; display: block; overflow: visible; }
 [data-action] { cursor: pointer; }
@@ -69,7 +71,16 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
   }
   const rules: string[] = [baseCss, fontRules(project.document, undefined, fontPaths)],
     mediaRules: string[] = [];
-  function node(n: DesignNode, parent: DesignNode | undefined, board: DesignNode): string {
+  function node(
+    n: DesignNode,
+    parent: DesignNode | undefined,
+    board: DesignNode,
+    fixedAncestor = false,
+    componentStates?: Set<string>
+  ): string {
+    const stateIds = n.component
+      ? new Set([n.component.defaultState, ...n.component.states.map((s) => s.id)])
+      : componentStates;
     const layout = project.layouts[n.id] ?? defaultLayout(),
       parentLayout = parent ? (project.layouts[parent.id] ?? defaultLayout()) : defaultLayout();
     const flow = options.responsive && parentLayout.mode !== 'absolute',
@@ -103,11 +114,26 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
     if (flow) Object.assign(rule, { 'flex-shrink': '0', 'max-width': '100%' });
     if (m[0] !== 1 || m[1] !== 0 || m[2] !== 0 || m[3] !== 1)
       rule.transform = `matrix(${m.slice(0, 4).map(round).join(', ')}, 0, 0)`;
+    if (n.fixed && !fixedAncestor) {
+      const world = worldBounds(board, n.id);
+      Object.assign(rule, {
+        position: 'fixed',
+        left: `${round(world?.x ?? x)}px`,
+        top: `${round(world?.y ?? y)}px`,
+        'z-index': '10',
+        isolation: 'isolate',
+      });
+    }
     const interaction = project.interactions[n.id] ?? {};
     const attributes: Record<string, string> = {
       id: safeId(n.id),
       class: `${isBoard ? 'artboard' : 'design-node'} ${className}`,
       'data-name': n.name,
+      ...(n.fixed ? { 'data-xd-fixed': '' } : {}),
+      ...(n.stateTarget && stateIds?.has(n.stateTarget)
+        ? { 'data-xd-state-target': n.stateTarget, role: 'button', tabindex: '0' }
+        : {}),
+      ...(n.component ? { 'data-xd-component': n.component.defaultState } : {}),
     };
     if (!n.visible) attributes.hidden = '';
     let tag = isBoard ? 'main' : layout.tag;
@@ -236,7 +262,7 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
         for (const run of text.runs) {
           if (run.from > cursor) chunks.push(esc(text.value.slice(cursor, run.from)));
           chunks.push(
-            `<span style="${esc(`font-family:${cssString(run.family)},sans-serif;font-size:${run.size}px;font-weight:${run.weight};font-style:${run.italic ? 'italic' : 'normal'};letter-spacing:${run.spacing}px;color:${run.color}`)}">${esc(text.value.slice(run.from, run.to))}</span>`
+            `<span style="${esc(`font-family:${fontStack(run.family)};font-size:${run.size}px;font-weight:${run.weight};font-style:${run.italic ? 'italic' : 'normal'};letter-spacing:${run.spacing}px;color:${run.color}`)}">${esc(text.value.slice(run.from, run.to))}</span>`
           );
           cursor = run.to;
         }
@@ -271,7 +297,20 @@ export function exportWeb(project: Project, options: WebOptions = defaultWebOpti
       rule.filter = n.style.shadows
         .map((s) => `drop-shadow(${s.x}px ${s.y}px ${s.blur / 2}px ${s.color})`)
         .join(' ');
-    if (!complex) content += n.children.map((c) => node(c, n, board)).join('\n');
+    if (!complex)
+      content += n.children
+        .map((c) => node(c, n, board, fixedAncestor || !!n.fixed, stateIds))
+        .join('\n');
+    if (n.component) {
+      content =
+        `<div data-xd-state="${esc(n.component.defaultState)}" class="component-state">${content}</div>` +
+        n.component.states
+          .map(
+            (state) =>
+              `<div data-xd-state="${esc(state.id)}" class="component-state" hidden>${node(state.node, n, board, fixedAncestor || !!n.fixed, stateIds)}</div>`
+          )
+          .join('');
+    }
     if (n.clip && !complex) {
       const clipId = `clip-${safeId(n.id)}`;
       rule['clip-path'] = `url(#${clipId})`;
@@ -317,21 +356,9 @@ export function webZip(bundle: WebBundle): Uint8Array {
   );
 }
 
-/** Blob URLs keep preview completely offline. Dispose before rebuilding. */
-export function createPreview(
-  bundle: WebBundle,
-  boardId: string
-): { url: string; dispose: () => void } {
-  const urls: string[] = [];
-  const make = (data: string | Uint8Array, type: string) => {
-    const url = URL.createObjectURL(
-      new Blob([typeof data === 'string' ? data : new Uint8Array(data)], { type })
-    );
-    urls.push(url);
-    return url;
-  };
-  const assetUrls: Record<string, string> = {};
-  const mimeTypes: Record<string, string> = {
+/** Inline resources also work in opaque-origin sandbox documents. */
+export function inlineWebPage(bundle: WebBundle, page: string, scriptUrl?: string): string {
+  const mime: Record<string, string> = {
     svg: 'image/svg+xml',
     png: 'image/png',
     jpg: 'image/jpeg',
@@ -342,31 +369,35 @@ export function createPreview(
     ttf: 'font/ttf',
     otf: 'font/otf',
   };
-  for (const [name, data] of Object.entries(bundle.files))
-    if (name.startsWith('assets/'))
-      assetUrls[name] = make(
-        data,
-        mimeTypes[name.split('.').at(-1)!] ?? 'application/octet-stream'
-      );
-  const replaceAssets = (value: string) =>
-    Object.entries(assetUrls).reduce((s, [path, url]) => s.replaceAll(path, url), value);
-  const css = make(replaceAssets(String(bundle.files['styles.css'])), 'text/css');
-  const runtime = make(String(bundle.files['interactions.js']), 'text/javascript');
-  const pages: Record<string, string> = {};
-  // Navigation uses a small parent message protocol to swap sandboxed pages.
-  const previewRuntime = make(
-    `function navigatePreview(e){var t=e.target.closest('[data-action="navigate"]');if(!t||(e.type==='keydown'&&e.key!=='Enter'&&e.key!==' '))return;e.preventDefault();e.stopImmediatePropagation();parent.postMessage({type:'xd-preview-navigate',page:t.dataset.page},'*');}document.addEventListener('click',navigatePreview,true);document.addEventListener('keydown',navigatePreview,true);`,
-    'text/javascript'
-  );
-  for (const path of Object.values(bundle.pages)) {
-    let html = replaceAssets(String(bundle.files[path]))
-      .replace('href="styles.css"', `href="${css}"`)
-      .replace('src="interactions.js"', `src="${runtime}"`);
-    html = html.replace('</head>', `<script src="${previewRuntime}"></script></head>`);
-    pages[path] = make(html, 'text/html');
-  }
+  const assets: Record<string, string> = {};
+  for (const [path, value] of Object.entries(bundle.files))
+    if (path.startsWith('assets/')) {
+      const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 32768)
+        binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
+      assets[path] =
+        `data:${mime[path.split('.').at(-1)!] ?? 'application/octet-stream'};base64,${btoa(binary)}`;
+    }
+  const inline = (s: string) => s.replace(/assets\/[a-zA-Z0-9.-]+/g, (p) => assets[p] ?? p);
+  const css = inline(String(bundle.files['styles.css'])).replaceAll('<', '\\3c ');
+  const script = scriptUrl
+    ? `<script src="${esc(scriptUrl)}" defer></script>`
+    : `<script>${String(bundle.files['interactions.js'])}</script>`;
+  return inline(String(bundle.files[page]))
+    .replace('<link rel="stylesheet" href="styles.css" />', `<style>${css}</style>`)
+    .replace('<script src="interactions.js" defer></script>', script);
+}
+
+/** The trusted runtime is a packaged app resource; no Blob fetches from a sandbox. */
+export function createPreview(
+  bundle: WebBundle,
+  boardId: string
+): { html: string; dispose: () => void } {
+  const page = bundle.pages[boardId];
+  if (!page) throw new Error('找不到預覽畫板。');
   return {
-    url: pages[bundle.pages[boardId]],
-    dispose: () => urls.forEach((url) => URL.revokeObjectURL(url)),
+    html: inlineWebPage(bundle, page, new URL(previewRuntimeUrl, window.location.href).href),
+    dispose: () => {},
   };
 }

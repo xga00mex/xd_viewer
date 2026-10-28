@@ -1,7 +1,7 @@
 {
   "name": "xd-local-studio",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "description": "完全本機的 Adobe XD 切版工作台",
   "scripts": {

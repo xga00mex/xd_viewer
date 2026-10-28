@@ -2,7 +2,7 @@ import type { Bounds, DesignDocument, DesignNode, Paint } from '../core/model';
 import { emptyStyle, flatten } from '../core/model';
 import { escapeHtml as esc, safeId } from '../core/escape';
 import { identity, multiply, round, transformBounds, union } from '../core/geometry';
-import { fontRules } from '../core/fonts';
+import { fontRules, fontStack } from '../core/fonts';
 
 export interface SvgOptions {
   removeRadius?: boolean;
@@ -103,18 +103,24 @@ function renderText(n: DesignNode, color: string): string {
   const lines = t.lines
     .map((line) => {
       const runs = t.runs.filter((r) => r.to > line.from && r.from < line.to);
-      const content = runs.length
-        ? runs
-            .map(
-              (r) =>
-                `<tspan ${attrs({ 'font-family': `${r.family}, Arial, sans-serif`, 'font-size': r.size, 'font-weight': r.weight, 'font-style': r.italic ? 'italic' : undefined, 'letter-spacing': r.spacing, fill: r.color })}>${esc(t.value.slice(Math.max(line.from, r.from), Math.min(line.to, r.to)))}</tspan>`
-            )
-            .join('')
-        : esc(t.value.slice(line.from, line.to));
+      let cursor = line.from;
+      const chunks: string[] = [];
+      for (const r of runs) {
+        const start = Math.max(cursor, r.from),
+          end = Math.min(line.to, r.to);
+        if (start > cursor) chunks.push(esc(t.value.slice(cursor, start)));
+        if (end > start)
+          chunks.push(
+            `<tspan ${attrs({ 'font-family': fontStack(r.family), 'font-size': r.size, 'font-weight': r.weight, 'font-style': r.italic ? 'italic' : undefined, 'letter-spacing': r.spacing, fill: r.color })}>${esc(t.value.slice(start, end))}</tspan>`
+          );
+        cursor = Math.max(cursor, end);
+      }
+      chunks.push(esc(t.value.slice(cursor, line.to)));
+      const content = chunks.join('');
       return `<tspan x="${line.x}" y="${line.y}">${content}</tspan>`;
     })
     .join('');
-  return `<text ${attrs({ 'font-family': `${t.family}, Arial, sans-serif`, 'font-size': t.size, 'font-weight': t.weight, 'font-style': t.italic ? 'italic' : undefined, 'letter-spacing': t.spacing, fill: color, 'xml:space': 'preserve' })}>${lines}</text>`;
+  return `<text ${attrs({ 'font-family': fontStack(t.family), 'font-size': t.size, 'font-weight': t.weight, 'font-style': t.italic ? 'italic' : undefined, 'letter-spacing': t.spacing, fill: color, 'xml:space': 'preserve' })}>${lines}</text>`;
 }
 function render(n: DesignNode, ctx: Context, transform = true): string {
   if (!n.visible && !ctx.options.includeHidden) return '';
@@ -180,7 +186,12 @@ function render(n: DesignNode, ctx: Context, transform = true): string {
     }
   } else if (n.kind === 'unsupported' && !n.children.length)
     content = geometry(n, { fill: '#f5ddeb', stroke: '#b96390', 'stroke-dasharray': '4 4' }, false);
-  content += n.children.map((c) => render(c, ctx)).join('');
+  // XD's fixed artboard layers form the foreground above scrolling content.
+  const children =
+    n.kind === 'artboard'
+      ? [...n.children.filter((c) => !c.fixed), ...n.children.filter((c) => c.fixed)]
+      : n.children;
+  content += children.map((c) => render(c, ctx)).join('');
   // A transparent hit target allows selecting whitespace in a text object.
   if (ctx.options.selection && n.kind === 'text')
     content += `<rect ${attrs({ ...n.bounds, fill: 'transparent' })}/>`;
@@ -194,7 +205,7 @@ export function renderBoard(
   const ctx: Context = { document, options, defs: [], prefix: 'board-' };
   const content = render(board, ctx);
   const fonts = options.embedFonts === false ? '' : fontRules(document, [board]);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${board.bounds.width}" height="${board.bounds.height}" viewBox="0 0 ${board.bounds.width} ${board.bounds.height}" role="img" aria-label="${esc(board.name)}"><defs>${fonts ? `<style>${fonts}</style>` : ''}${ctx.defs.join('')}</defs>${content}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${board.bounds.width}" height="${board.bounds.height}" viewBox="0 0 ${board.bounds.width} ${board.bounds.height}" role="img" aria-label="${esc(board.name)}"><defs>${fonts ? `<style>${esc(fonts)}</style>` : ''}${ctx.defs.join('')}</defs>${content}</svg>`;
 }
 function visualBounds(node: DesignNode): Bounds {
   let b = node.bounds;
@@ -248,7 +259,7 @@ export function renderAsset(
   const pad = options.padding ?? 0;
   const content = render(copy, ctx);
   const fonts = options.embedFonts === false ? '' : fontRules(document, [node]);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.max(1, b.width + pad * 2)}" height="${Math.max(1, b.height + pad * 2)}" viewBox="${b.x - pad} ${b.y - pad} ${Math.max(1, b.width + pad * 2)} ${Math.max(1, b.height + pad * 2)}"><defs>${fonts ? `<style>${fonts}</style>` : ''}${ctx.defs.join('')}</defs>${content}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.max(1, b.width + pad * 2)}" height="${Math.max(1, b.height + pad * 2)}" viewBox="${b.x - pad} ${b.y - pad} ${Math.max(1, b.width + pad * 2)} ${Math.max(1, b.height + pad * 2)}"><defs>${fonts ? `<style>${esc(fonts)}</style>` : ''}${ctx.defs.join('')}</defs>${content}</svg>`;
 }
 /** Keep the selected scene in board order, including its ancestor transforms/effects. */
 export function renderMergedAsset(

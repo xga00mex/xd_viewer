@@ -18,7 +18,7 @@ vi.mock('../src/core/project', async (importOriginal) => ({
 }));
 vi.mock('../src/export/web', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/export/web')>()),
-  createPreview: vi.fn(() => ({ url: 'about:blank', dispose: vi.fn() })),
+  createPreview: vi.fn(() => ({ html: '<p>Preview</p>', dispose: vi.fn() })),
 }));
 let app: Studio;
 const click = (selector: string) => {
@@ -62,6 +62,28 @@ afterEach(() => {
 });
 
 describe('three-column local workbench DOM integration', () => {
+  it('opens the full-artboard page and exports all boards without a layer selection', async () => {
+    app.setProject(createProject(parseXd(multiBoardXd())), false);
+    app.selected.clear();
+    click('[data-action="overview"]');
+    expect(document.querySelector<HTMLIFrameElement>('#preview-stage iframe')!.srcdoc).toBe(
+      '<p>Preview</p>'
+    );
+    expect(document.querySelector<HTMLElement>('#preview-stage')!.hidden).toBe(false);
+    click('[data-action="export"]');
+    click('[data-action="export-tab-assets"]');
+    change('[data-field="export.scope"]', 'all');
+    expect(
+      document.querySelector<HTMLButtonElement>('[data-action="download-export"]')!.disabled
+    ).toBe(false);
+    click('[data-action="download-export"]');
+    await vi.waitFor(() => expect(download).toHaveBeenCalled());
+    const args = vi.mocked(download).mock.calls.at(-1)!;
+    expect(args[1]).toMatch(/\.zip$/);
+    const { unzipSync } = await import('fflate');
+    expect(Object.keys(unzipSync(args[0] as Uint8Array))).toHaveLength(4);
+    expect(app.selected.size).toBe(0);
+  });
   it('drags the artboard with the left mouse button without changing selection', () => {
     app.select('card-0');
     const viewport = pointerViewport();

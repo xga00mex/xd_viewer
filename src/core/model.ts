@@ -85,6 +85,9 @@ export interface DesignNode {
   text?: TextData;
   clip?: DesignNode;
   viewportHeight?: number;
+  fixed?: boolean;
+  stateTarget?: string;
+  component?: { defaultState: string; states: { id: string; node: DesignNode }[] };
 }
 export interface Asset {
   id: string;

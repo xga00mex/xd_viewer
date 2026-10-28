@@ -18,7 +18,9 @@ export function openArchive(bytes: Uint8Array): Record<string, Uint8Array> {
         total += entry.originalSize;
         if (entry.originalSize > MAX_FILE_SIZE || total > MAX_EXPANDED_SIZE)
           throw new Error('解壓縮後的資料過大。');
-        return /(?:\.agc$|^manifest$|^resources\/|^preview\/|^thumbnail)/i.test(entry.name);
+        return /(?:\.agc$|^manifest$|^interactions\/interactions\.json$|^resources\/|^preview\/|^thumbnail)/i.test(
+          entry.name
+        );
       },
     });
   } catch (error) {

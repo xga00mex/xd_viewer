@@ -44,9 +44,21 @@ async function collect(name) {
   for (const dep of Object.keys(metadata.dependencies ?? {})) await collect(dep);
 }
 for (const name of Object.keys(pkg.dependencies)) await collect(name);
+sections.push(
+  'Noto Sans TC — bundled offline fallback (WOFF2)\nhttps://github.com/google/fonts/tree/main/ofl/notosanstc\n\n' +
+    (await readFile(new URL('assets/fonts/OFL.txt', root), 'utf8'))
+);
 await writeFile(
   new URL('THIRD_PARTY_NOTICES.txt', root),
   'XD Local bundled renderer dependencies\nElectron and Chromium notices are also included with the packaged runtime.\n\n' +
-    sections.join('\n\n----------------------------------------\n\n') +
+    sections
+      .map((s) =>
+        s
+          .trim()
+          .split(/\r?\n/)
+          .map((line) => line.trimEnd())
+          .join('\n')
+      )
+      .join('\n\n----------------------------------------\n\n') +
     '\n'
 );
