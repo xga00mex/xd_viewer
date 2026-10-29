@@ -1,5 +1,5 @@
-appId: studio.xdlocal.desktop
-productName: XD Local
+appId: studio.xv.desktop
+productName: XV
 directories:
   output: release
 files:
@@ -15,8 +15,8 @@ win:
   target:
     - target: portable
       arch: [x64]
-  artifactName: XD-Local-${version}-Windows-x64.exe
+  artifactName: XV-${version}-Windows-x64.exe
   signExecutable: false
   icon: desktop/icon.ico
 portable:
-  artifactName: XD-Local-${version}-Windows-x64.exe
+  artifactName: XV-${version}-Windows-x64.exe

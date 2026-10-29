@@ -100,7 +100,10 @@ try {
   };
   root.querySelector('[data-action="preview"]').click();
   console.error = originalError;
-  const preview = root.querySelector('#preview-stage iframe').srcdoc;
+  const previewFrame = root.querySelector('#preview-stage iframe');
+  assert(!previewFrame.hasAttribute('srcdoc'), 'Empty srcdoc cannot override the preview URL');
+  const previewIndex = Number(previewFrame.src.split('/').at(-1)) - 1;
+  const preview = await blobs[previewIndex].text();
   assert(preview.includes('<style>'), 'Preview embeds its CSS');
   assert(!/(?:src|href)="blob:/.test(preview), 'Opaque preview does not fetch Blob subresources');
   const scriptUrl = preview.match(/<script src="([^"]+)" defer>/)?.[1];

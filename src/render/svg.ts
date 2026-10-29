@@ -6,6 +6,7 @@ import { fontRules, fontStack } from '../core/fonts';
 
 export interface SvgOptions {
   removeRadius?: boolean;
+  removeOpacity?: boolean;
   selection?: boolean;
   includeHidden?: boolean;
   padding?: number;
@@ -127,7 +128,7 @@ function render(n: DesignNode, ctx: Context, transform = true): string {
   const id = ctx.prefix + safeId(n.id),
     group: Record<string, unknown> = {
       transform: transform ? mat(n.transform) : undefined,
-      opacity: n.style.opacity,
+      opacity: ctx.options.removeOpacity ? 1 : n.style.opacity,
     };
   if (ctx.options.selection) group['data-node-id'] = n.id;
   if (n.style.blendMode) group.style = `mix-blend-mode:${n.style.blendMode}`;

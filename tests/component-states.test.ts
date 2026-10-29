@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { it, expect, vi, afterEach } from 'vitest';
 import { strToU8, zipSync } from 'fflate';
-import { parseXd } from '../src/parser/xd';
+import { parseXd } from '../src/parser/design';
 import { createProject } from '../src/core/model';
 import { parseProject, serializeProject } from '../src/core/project';
 import { exportWeb } from '../src/export/web';

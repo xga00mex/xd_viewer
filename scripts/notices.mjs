@@ -50,7 +50,7 @@ sections.push(
 );
 await writeFile(
   new URL('THIRD_PARTY_NOTICES.txt', root),
-  'XD Local bundled renderer dependencies\nElectron and Chromium notices are also included with the packaged runtime.\n\n' +
+  'XV bundled renderer dependencies\nElectron and Chromium notices are also included with the packaged runtime.\n\n' +
     sections
       .map((s) =>
         s

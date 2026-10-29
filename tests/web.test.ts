@@ -18,6 +18,17 @@ afterEach(() => {
 });
 
 describe('maintainable web export', () => {
+  it('allocates a navigable preview document and releases it when replaced', async () => {
+    const create = vi.spyOn(URL, 'createObjectURL');
+    const revoke = vi.spyOn(URL, 'revokeObjectURL');
+    const preview = createPreview(exportWeb(demoProject()), 'demo-board');
+    expect(preview.url).toMatch(/^blob:/);
+    const blob = create.mock.calls.at(-1)![0] as Blob;
+    expect(await blob.text()).toBe(preview.html);
+    expect(preview.html).toContain(`data-preview-id="${preview.id}"`);
+    preview.dispose();
+    expect(revoke).toHaveBeenCalledWith(preview.url);
+  });
   it('gives the opaque sandbox a self-contained page without Blob subresources', () => {
     const preview = createPreview(exportWeb(demoProject()), 'demo-board');
     expect(preview).toHaveProperty('html');
@@ -91,6 +102,18 @@ describe('maintainable web export', () => {
   });
 });
 describe('exported interactions', () => {
+  it('does not collapse artwork to scale zero while its viewport is still hidden', () => {
+    vi.stubGlobal('ResizeObserver', undefined);
+    document.body.innerHTML =
+      '<div><main data-scale-width="100" data-scale-height="200"></main></div>';
+    interactionRuntime();
+    expect(document.querySelector('main')!.style.transform).not.toBe('scale(0)');
+    Object.defineProperty(document.querySelector('main')!.parentElement, 'clientWidth', {
+      value: 50,
+    });
+    window.dispatchEvent(new Event('resize'));
+    expect(document.querySelector('main')!.style.transform).toBe('scale(0.5)');
+  });
   it('handles nested toggle keyboard events once and synchronizes both controls', () => {
     document.body.innerHTML =
       '<div data-action="toggle" data-target="panel"><span id="inner" tabindex="0" data-action="toggle" data-target="panel"></span></div><button id="other" data-action="toggle" data-target="panel"></button><section id="panel" hidden></section>';
@@ -111,7 +134,7 @@ describe('exported interactions', () => {
       .getElementById('nav')!
       .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     expect(postMessage).toHaveBeenCalledWith(
-      { type: 'xd-preview-navigate', page: 'next.html' },
+      { type: 'xv-preview-navigate', page: 'next.html' },
       '*'
     );
   });

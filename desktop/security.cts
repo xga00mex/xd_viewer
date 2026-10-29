@@ -1,13 +1,13 @@
 import path from 'node:path';
 
-export const APP_URL = 'xd-local://app/index.html';
+export const APP_URL = 'xv://app/index.html';
 export function trustedRenderer(url: string): boolean {
   return url === APP_URL;
 }
 export function assetPath(root: string, url: string): string | undefined {
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'xd-local:' || parsed.hostname !== 'app') return;
+    if (parsed.protocol !== 'xv:' || parsed.hostname !== 'app') return;
     const pathname = decodeURIComponent(parsed.pathname);
     if (pathname.includes('\\') || pathname.includes('\0')) return;
     const result = path.resolve(root, '.' + (pathname === '/' ? '/index.html' : pathname));

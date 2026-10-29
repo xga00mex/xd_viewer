@@ -7,27 +7,25 @@ const { assetPath, trustedRenderer, safeSaveName, validateWorkspace } = createRe
 
 describe('desktop trust boundaries', () => {
   it('permits only the main bundled UI as an IPC caller', () => {
-    expect(trustedRenderer('xd-local://app/index.html')).toBe(true);
+    expect(trustedRenderer('xv://app/index.html')).toBe(true);
     for (const url of [
       'https://example.com',
       'file:///index.html',
       'about:srcdoc',
-      'xd-local://app/index.html#untrusted',
-      'xd-local://other/index.html',
+      'xv://app/index.html#untrusted',
+      'xv://other/index.html',
     ])
       expect(trustedRenderer(url)).toBe(false);
   });
   it('resolves assets only within the bundle', () => {
     const root = path.resolve('dist');
-    expect(assetPath(root, 'xd-local://app/assets/main.js')).toBe(
-      path.join(root, 'assets/main.js')
-    );
+    expect(assetPath(root, 'xv://app/assets/main.js')).toBe(path.join(root, 'assets/main.js'));
     for (const url of [
       'https://example.com/assets.js',
-      'xd-local://other/index.html',
-      'xd-local://app/..%5csecrets',
-      'xd-local://app/%00',
-      'xd-local://app/%',
+      'xv://other/index.html',
+      'xv://app/..%5csecrets',
+      'xv://app/%00',
+      'xv://app/%',
     ])
       expect(assetPath(root, url)).toBeUndefined();
   });

@@ -1,4 +1,4 @@
-import { parseXd } from './xd';
+import { parseXd } from './design';
 self.onmessage = (event: MessageEvent<{ bytes: ArrayBuffer; name: string }>) => {
   try {
     self.postMessage({ document: parseXd(new Uint8Array(event.data.bytes), event.data.name) });

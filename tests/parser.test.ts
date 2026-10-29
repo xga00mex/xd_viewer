@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { zipSync, strToU8 } from 'fflate';
-import { parseXd } from '../src/parser/xd';
+import { parseXd } from '../src/parser/design';
 import { flatten } from '../src/core/model';
 import { parseProject, serializeProject } from '../src/core/project';
 import { createProject } from '../src/core/model';

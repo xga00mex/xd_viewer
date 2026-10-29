@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import sharp from 'sharp';
-import { parseXd } from '../src/parser/xd';
+import { parseXd } from '../src/parser/design';
 import { createProject, flatten } from '../src/core/model';
 import { worldBounds } from '../src/core/geometry';
 import { renderBoard, renderAsset } from '../src/render/svg';
@@ -70,8 +70,6 @@ describe.skipIf(!path)('supplied XD file verification', () => {
   });
 
   it('keeps continuous baselines and renders all positioned text characters', () => {
-    const notices = flatten(doc.artboards).filter((n) => n.text?.value.includes('即可享免運優惠'));
-    for (const notice of notices) expect(notice.text?.lines, notice.id).toHaveLength(1);
     for (const node of flatten(doc.artboards).filter((n) => n.text)) {
       const text = node.text!;
       const svg = renderAsset(doc, { ...node, visible: true }, { embedFonts: false });

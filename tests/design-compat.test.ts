@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { strToU8, zipSync } from 'fflate';
 import sharp from 'sharp';
-import { parseXd } from '../src/parser/xd';
+import { parseXd } from '../src/parser/design';
 import { createProject, flatten } from '../src/core/model';
 import { worldBounds } from '../src/core/geometry';
 import { parseProject, serializeProject } from '../src/core/project';

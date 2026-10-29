@@ -7,7 +7,7 @@ const response = await fetch(origin);
 assert.equal(response.status, 200);
 assert.match(response.headers.get('content-type'), /text\/html/);
 assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
-assert.match(await response.text(), /XD Local/);
+assert.match(await response.text(), /XV/);
 for (const filename of await readdir(new URL('../dist/assets/', import.meta.url))) {
   const asset = await fetch(`${origin}/assets/${filename}`);
   assert.equal(asset.status, 200, filename);

@@ -74,7 +74,10 @@ export function interactionRuntime() {
     const update = () => {
       const width = Number(element.dataset.scaleWidth),
         height = Number(element.dataset.scaleHeight);
-      const ratio = Math.min(1, element.parentElement!.clientWidth / width);
+      const available = element.parentElement!.clientWidth;
+      // A hidden/unlaid-out iframe must not erase the design with scale(0).
+      if (available <= 0 || width <= 0) return;
+      const ratio = Math.min(1, available / width);
       element.style.transform = `scale(${ratio})`;
       element.parentElement!.style.height = `${height * ratio}px`;
     };
@@ -85,4 +88,4 @@ export function interactionRuntime() {
   });
 }
 export const runtimeSource = () =>
-  `/* XD Local: native interactions, no external runtime dependencies. */\n(${interactionRuntime.toString()})();\n`;
+  `/* XV: native interactions, no external runtime dependencies. */\n(${interactionRuntime.toString()})();\n`;

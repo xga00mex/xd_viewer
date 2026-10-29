@@ -1,4 +1,4 @@
-XD Local bundled renderer dependencies
+XV bundled renderer dependencies
 Electron and Chromium notices are also included with the packaged runtime.
 
 fflate 0.8.3

@@ -30,4 +30,4 @@ Sharp 可完整渲染真實 XD 與原創示範文件的 SVG。已目視檢查生
 
 遵守全域偏好，沒有啟動或控制任何實際瀏覽器、Windows 應用程式或 UI 自動化工具。Happy DOM 是記憶體內模型，Sharp 是 SVG rasterizer；尚未進行實際瀏覽器視覺驗收、Canvas PNG 下載驗收或大量新版 XD 檔案相容性測試。
 
-已知限制與使用方式列於 README；格式研究與後續擴充點列於 `xd-format-research.md` 和 `architecture.md`。
+已知限制與使用方式列於 README；格式研究與後續擴充點列於 `design-format-research.md` 和 `architecture.md`。

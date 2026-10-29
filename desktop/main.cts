@@ -20,11 +20,12 @@ import {
   validateWorkspace,
 } from './security.cjs';
 
-app.setName('XD Local');
-app.setAppUserModelId('studio.xdlocal.desktop');
+app.setName('XV');
+app.setAppUserModelId('studio.xv.desktop');
+app.setPath('userData', path.join(app.getPath('appData'), 'XV'));
 protocol.registerSchemesAsPrivileged([
   {
-    scheme: 'xd-local',
+    scheme: 'xv',
     privileges: {
       standard: true,
       secure: true,
@@ -49,8 +50,13 @@ const mime: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.woff2': 'font/woff2',
 };
-const extensions = { design: ['xd', 'xdlocal', 'json'], font: ['woff2', 'woff', 'ttf', 'otf'] };
-let startupPath = process.argv.find((arg) => !arg.startsWith('-') && /\.(xd|xdlocal)$/i.test(arg));
+const extensions = {
+  design: ['xd', 'xv', 'xdlocal', 'json'],
+  font: ['woff2', 'woff', 'ttf', 'otf'],
+};
+let startupPath = process.argv.find(
+  (arg) => !arg.startsWith('-') && /\.(xd|xv|xdlocal)$/i.test(arg)
+);
 let writes: Promise<unknown> = Promise.resolve();
 function authorize(event: IpcMainInvokeEvent) {
   if (
@@ -110,12 +116,12 @@ function buildMenu() {
         { label: '管理本機字型', click: () => send('fonts') },
         { type: 'separator' },
         {
-          label: '關於 XD Local',
+          label: '關於 XV',
           click: () => {
             void dialog.showMessageBox(window!, {
               type: 'info',
-              title: 'XD Local',
-              message: `XD Local ${app.getVersion()}`,
+              title: 'XV',
+              message: `XV ${app.getVersion()}`,
               detail:
                 '本機 XD 設計稿檢視與切版工具\n不需要瀏覽器或 Adobe XD。匯出 HTML 可供瀏覽器檢視。',
             });
@@ -177,7 +183,17 @@ function registerIpc() {
       if ((await stat(file)).size > 180 * 1024 * 1024) throw new Error('工作檔過大');
       return await readFile(file, 'utf8');
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        // Read the former product's workspace once; subsequent saves use XV.
+        const legacy = path.join(app.getPath('appData'), 'XD Local', 'workspace.json');
+        try {
+          if ((await stat(legacy)).size > 180 * 1024 * 1024) throw new Error('工作檔過大');
+          return await readFile(legacy, 'utf8');
+        } catch (legacyError) {
+          if ((legacyError as NodeJS.ErrnoException).code === 'ENOENT') return null;
+          throw legacyError;
+        }
+      }
       throw error;
     }
   });
@@ -209,7 +225,7 @@ else {
   app
     .whenReady()
     .then(async () => {
-      protocol.handle('xd-local', async (request) => {
+      protocol.handle('xv', async (request) => {
         if (!['GET', 'HEAD'].includes(request.method)) return new Response(null, { status: 405 });
         const file = assetPath(root, request.url);
         if (!file) return new Response(null, { status: 403 });
@@ -236,13 +252,13 @@ else {
         try {
           const response = await net.fetch(APP_URL),
             html = await response.text();
-          if (response.status !== 200 || !html.includes('XD Local'))
+          if (response.status !== 200 || !html.includes('XV'))
             throw new Error('主程式資源檢查失敗');
           const refs = [...html.matchAll(/(?:src|href)="(\/assets\/[^\"]+)"/g)].map(
             (match) => match[1]
           );
           for (const ref of refs) {
-            if ((await net.fetch('xd-local://app' + ref)).status !== 200)
+            if ((await net.fetch('xv://app' + ref)).status !== 200)
               throw new Error('無法載入 ' + ref);
           }
           await readFile(path.join(__dirname, 'preload.cjs'));
@@ -257,7 +273,7 @@ else {
                 electron: process.versions.electron,
                 packaged: app.isPackaged,
                 assets: refs.length,
-                protocol: 'xd-local',
+                protocol: 'xv',
                 guiAutomation: false,
               },
               null,
@@ -280,7 +296,7 @@ else {
         minWidth: 980,
         minHeight: 640,
         show: false,
-        title: 'XD Local',
+        title: 'XV',
         backgroundColor: '#17191c',
         webPreferences: {
           preload: path.join(__dirname, 'preload.cjs'),

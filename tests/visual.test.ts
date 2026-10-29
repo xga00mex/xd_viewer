@@ -2,7 +2,7 @@ import { it, expect } from 'vitest';
 import sharp from 'sharp';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { unzipSync } from 'fflate';
-import { parseXd } from '../src/parser/xd';
+import { parseXd } from '../src/parser/design';
 import { renderBoard } from '../src/render/svg';
 import { demoProject } from '../src/demo';
 

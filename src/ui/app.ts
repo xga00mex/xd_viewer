@@ -3,6 +3,7 @@ import { defaultLayout, findNode, flatten, createProject } from '../core/model';
 import { escapeHtml as esc, filename } from '../core/escape';
 import { round, worldBounds, measure } from '../core/geometry';
 import { History } from '../core/history';
+import { enclosedNodes, groupSelection, ungroupSelection } from '../core/selection';
 import { parseProject, serializeProject, restoreLocal, saveLocal } from '../core/project';
 import { importXd } from '../parser/import';
 import { inspectCss, paintCss } from '../export/css';
@@ -76,6 +77,7 @@ export class Studio {
   private saveTimer?: ReturnType<typeof setTimeout>;
   private hasLocalChanges = false;
   private previewTimer?: ReturnType<typeof setTimeout>;
+  private previewReadyTimer?: ReturnType<typeof setTimeout>;
   private toastTimer?: ReturnType<typeof setTimeout>;
   private generation = 0;
   private saveRevision = 0;
@@ -90,10 +92,27 @@ export class Studio {
     active: boolean;
   };
   private suppressCanvasClick = false;
+  private marquee?: {
+    pointerId: number;
+    x: number;
+    y: number;
+    clientX: number;
+    clientY: number;
+    endX: number;
+    endY: number;
+    active: boolean;
+    initial: Set<string>;
+    additive: boolean;
+  };
   private exportTab: 'web' | 'assets' = 'web';
   private exportMode: 'viewer' | 'code' | 'overview' = 'viewer';
   private unsubscribeMenu?: () => void;
-  private assetOptions: AssetOptions = { format: 'svg', scale: 1, removeRadius: false };
+  private assetOptions: AssetOptions = {
+    format: 'svg',
+    scale: 1,
+    removeRadius: false,
+    removeOpacity: false,
+  };
   private assetScope: 'selection' | 'all' = 'selection';
   private abort = new AbortController();
   constructor(
@@ -105,6 +124,18 @@ export class Studio {
     this.viewportWidth = this.board.bounds.width;
     this.selected.add(project.document.artboards[0].children[1]?.children[0]?.id ?? this.boardId);
     this.shell();
+    const menu = document.createElement('div');
+    menu.id = 'canvas-menu';
+    menu.className = 'canvas-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', '圖層操作');
+    menu.hidden = true;
+    this.root.append(menu);
+    const previewMessage = document.createElement('div');
+    previewMessage.id = 'preview-message';
+    previewMessage.setAttribute('role', 'status');
+    previewMessage.hidden = true;
+    this.el('#preview-stage').prepend(previewMessage);
     this.bind();
     this.renderAll();
     this.loadDocumentFonts(project);
@@ -138,13 +169,13 @@ export class Studio {
     }
   }
   private shell() {
-    this.root.innerHTML = `<header class="topbar"><div class="brand"><span class="brand-mark">xd<span>↗</span></span><div>XD Local<small>本機切版工作台</small></div></div><div class="document-name"><span id="doc-title"></span><span class="file-tag" id="source-tag"></span></div><div class="top-actions"><span class="save-state" id="save-state">完全本機運作</span>${button('help', '', 'info', 'icon-button', 'aria-label="使用說明" title="使用說明"')}${button('open', '開啟檔案', 'import', 'secondary')}${button('save', '儲存工作檔', 'save', 'secondary')}${button('export', '匯出', 'export', 'primary')}</div></header>
+    this.root.innerHTML = `<header class="topbar"><div class="brand"><span class="brand-mark">XV<span>↗</span></span><div>XV<small>本機切版工作台</small></div></div><div class="document-name"><span id="doc-title"></span><span class="file-tag" id="source-tag"></span></div><div class="top-actions"><span class="save-state" id="save-state">完全本機運作</span>${button('help', '', 'info', 'icon-button', 'aria-label="使用說明" title="使用說明"')}${button('open', '開啟檔案', 'import', 'secondary')}${button('save', '儲存工作檔', 'save', 'secondary')}${button('export', '匯出', 'export', 'primary')}</div></header>
       <div class="workspace"><aside class="left-panel panel"><div class="panel-tabs"><button data-action="layers" class="active">${icon('layers')}圖層</button><button data-action="assets">${icon('image')}素材</button></div><div class="board-control"><label for="boards">畫板</label><select id="boards" aria-label="切換畫板"></select></div><div class="search-box">${icon('search')}<input id="layer-search" placeholder="搜尋圖層…" aria-label="搜尋圖層"/><kbd>⌕</kbd></div><div class="layer-meta"><span id="layer-count"></span>${button('select-all', '全選', undefined, 'text-button')}</div><nav id="layer-tree" aria-label="圖層樹"></nav><div class="left-footer"><span class="local-dot"></span><span>檔案留在這台電腦</span>${button('diagnostics', '', 'info', 'icon-button', 'aria-label="匯入相容性報告"')}</div></aside>
       <main class="center-panel"><div class="canvas-toolbar"><div class="mode-switch">${button('design', '檢視', 'cursor', 'active')}${button('preview', '互動預覽', 'play')}${button('overview', '全畫板', 'layers')}</div><div class="toolbar-spacer"></div><div id="preview-tools" hidden><select id="viewport-width" aria-label="預覽裝置寬度"><option value="375">手機 · 375</option><option value="768">平板 · 768</option><option value="1200">桌面 · 1200</option><option value="original">原始尺寸</option></select>${button('refresh-preview', '重播', undefined, 'text-button')}</div><div id="zoom-tools">${button('zoom-out', '−', undefined, 'icon-button', 'aria-label="縮小"')}<button data-action="zoom-reset" id="zoom-label">60%</button>${button('zoom-in', '+', undefined, 'icon-button', 'aria-label="放大"')}${button('fit', '', 'fit', 'icon-button', 'aria-label="符合視窗" title="符合視窗 (F)"')}</div></div>
-      <div class="canvas-viewport" id="canvas-viewport"><div class="canvas-paper" id="canvas-paper"><div id="board-caption"></div><div id="design-stage"></div><svg id="selection-overlay" xmlns="http://www.w3.org/2000/svg"></svg></div></div><div id="preview-stage" hidden><div id="overview-boards" hidden></div><iframe title="本機互動預覽" sandbox="allow-scripts" srcdoc=""></iframe></div><div class="canvas-bottom"><span id="canvas-status">左鍵拖曳畫板 · Ctrl／⌘ 多選 · Alt 測距</span><div>${button('undo', '', 'undo', 'icon-button', 'aria-label="復原" title="Ctrl+Z"')}${button('redo', '', 'redo', 'icon-button', 'aria-label="重做" title="Ctrl+Shift+Z"')}<span class="divider"></span><span id="dimensions"></span></div></div></main>
+      <div class="canvas-viewport" id="canvas-viewport"><div class="canvas-paper" id="canvas-paper"><div id="board-caption"></div><div id="design-stage"></div><svg id="selection-overlay" xmlns="http://www.w3.org/2000/svg"></svg></div></div><div id="preview-stage" hidden><div id="overview-boards" hidden></div><iframe title="本機互動預覽" sandbox="allow-scripts" srcdoc=""></iframe></div><div class="canvas-bottom"><span id="canvas-status">左鍵框選 · Shift 多選 · 空白鍵／中鍵拖曳 · Alt 測距</span><div>${button('undo', '', 'undo', 'icon-button', 'aria-label="復原" title="Ctrl+Z"')}${button('redo', '', 'redo', 'icon-button', 'aria-label="重做" title="Ctrl+Shift+Z"')}<span class="divider"></span><span id="dimensions"></span></div></div></main>
       <aside class="right-panel panel"><div class="panel-tabs inspector-tabs"><button data-action="inspect" class="active">屬性</button><button data-action="interact">互動</button><button data-action="layout">排版</button></div><div id="inspector"></div></aside></div>
       <footer class="statusbar"><span>LOCAL FIRST <span class="status-separator">/</span> 無需 Adobe XD</span><button id="diagnostic-button" data-action="diagnostics"></button><span>v${version} · Desktop</span></footer>
-      <input type="file" id="file-input" accept=".xd,.xdlocal,.json" hidden /><input type="file" id="font-input" accept=".woff2,.woff,.ttf,.otf" hidden /><div id="toast" role="status" aria-live="polite" hidden></div><div id="drop-overlay" hidden>${icon('import', 48)}<strong>放開以匯入設計稿</strong><span>.xd 或 .xdlocal 工作檔</span></div><div id="busy-overlay" hidden><span class="spinner"></span><strong id="busy-label">正在解析設計稿…</strong><span>所有處理都在本機進行</span></div><dialog id="modal"></dialog>`;
+      <input type="file" id="file-input" accept=".xd,.xv,.xdlocal,.json" hidden /><input type="file" id="font-input" accept=".woff2,.woff,.ttf,.otf" hidden /><div id="toast" role="status" aria-live="polite" hidden></div><div id="drop-overlay" hidden>${icon('import', 48)}<strong>放開以匯入設計稿</strong><span>.xd 或 .xv 工作檔</span></div><div id="busy-overlay" hidden><span class="spinner"></span><strong id="busy-label">正在解析設計稿…</strong><span>所有處理都在本機進行</span></div><dialog id="modal"></dialog>`;
   }
   private bind() {
     const signal = this.abort.signal;
@@ -164,6 +195,7 @@ export class Studio {
       'click',
       (event) => {
         const target = event.target as Element;
+        if (!target.closest('#canvas-menu')) this.hideCanvasMenu();
         if (this.suppressCanvasClick && target.closest('#canvas-viewport')) {
           this.suppressCanvasClick = false;
           event.preventDefault();
@@ -181,7 +213,10 @@ export class Studio {
         }
         const node = target.closest<SVGElement>('[data-node-id]');
         if (node && !this.space && !this.pan) {
-          this.select(node.dataset.nodeId!, event.ctrlKey || event.metaKey || event.shiftKey);
+          this.select(
+            this.canvasNode(node, event.ctrlKey || event.metaKey),
+            event.ctrlKey || event.metaKey || event.shiftKey
+          );
           return;
         }
         if (target.id === 'canvas-viewport') {
@@ -235,6 +270,69 @@ export class Studio {
     );
     const viewport = this.el('#canvas-viewport');
     viewport.addEventListener(
+      'contextmenu',
+      (event) => {
+        event.preventDefault();
+        this.finishPan();
+        this.finishMarquee(true);
+        const node = (event.target as Element).closest<SVGElement>('[data-node-id]');
+        const ancestors = node
+          ? Array.from(node.closest('svg')?.querySelectorAll('[data-node-id]') ?? [])
+          : [];
+        const insideSelection = ancestors.some(
+          (el) =>
+            this.selected.has((el as SVGElement).dataset.nodeId!) &&
+            el.contains(event.target as Node)
+        );
+        if (node && !insideSelection && node.dataset.nodeId !== this.boardId)
+          this.select(this.canvasNode(node, event.ctrlKey || event.metaKey));
+        const menu = this.el('#canvas-menu');
+        menu.innerHTML =
+          button(
+            'group-selection',
+            '組合',
+            undefined,
+            '',
+            `role="menuitem" ${this.selected.size < 2 || this.selected.has(this.boardId) ? 'disabled' : ''}`
+          ) +
+          button(
+            'ungroup-selection',
+            '解散群組',
+            undefined,
+            '',
+            `role="menuitem" ${[...this.selected].some((id) => findNode(this.project, id)?.kind === 'group') ? '' : 'disabled'}`
+          ) +
+          button(
+            'context-export',
+            '匯出素材…',
+            undefined,
+            '',
+            `role="menuitem" ${this.selected.size ? '' : 'disabled'}`
+          );
+        menu.hidden = false;
+        menu.style.left = `${Math.max(0, Math.min(event.clientX, window.innerWidth - 200))}px`;
+        menu.style.top = `${Math.max(0, Math.min(event.clientY, window.innerHeight - 140))}px`;
+        menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+      },
+      { signal }
+    );
+    viewport.addEventListener(
+      'dblclick',
+      (event) => {
+        const node = (event.target as Element).closest<SVGElement>('[data-node-id]');
+        if (node) this.select(node.dataset.nodeId!, event.shiftKey);
+      },
+      { signal }
+    );
+    this.root.addEventListener(
+      'pointerdown',
+      (event) => {
+        if (!(event.target as Element).closest('#canvas-menu')) this.hideCanvasMenu();
+      },
+      { signal }
+    );
+    viewport.addEventListener('scroll', () => this.hideCanvasMenu(), { signal });
+    viewport.addEventListener(
       'wheel',
       (event) => {
         if (event.ctrlKey || event.metaKey) {
@@ -247,14 +345,25 @@ export class Studio {
     viewport.addEventListener(
       'pointerdown',
       (event) => {
-        if (this.pan || (event.button !== 0 && event.button !== 1)) return;
+        if (this.pan || this.marquee || (event.button !== 0 && event.button !== 1)) return;
         this.suppressCanvasClick = false;
-        if (
-          event.button === 0 &&
-          !this.space &&
-          (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey)
-        )
+        if (event.button === 0 && !this.space) {
+          if (event.altKey) return;
+          const point = this.canvasPoint(event);
+          this.marquee = {
+            pointerId: event.pointerId,
+            x: point.x,
+            y: point.y,
+            endX: point.x,
+            endY: point.y,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            active: false,
+            initial: new Set(this.selected),
+            additive: event.shiftKey || event.ctrlKey || event.metaKey,
+          };
           return;
+        }
         const active = this.space || event.button === 1;
         this.pan = {
           pointerId: event.pointerId,
@@ -276,6 +385,31 @@ export class Studio {
     viewport.addEventListener(
       'pointermove',
       (event) => {
+        const marquee = this.marquee;
+        if (marquee) {
+          if (marquee.pointerId !== event.pointerId) return;
+          if (!marquee.active) {
+            if (Math.hypot(event.clientX - marquee.clientX, event.clientY - marquee.clientY) < 4)
+              return;
+            marquee.active = true;
+            this.suppressCanvasClick = true;
+            viewport.setPointerCapture(event.pointerId);
+            viewport.classList.add('selecting');
+          }
+          event.preventDefault();
+          const point = this.canvasPoint(event);
+          marquee.endX = point.x;
+          marquee.endY = point.y;
+          const area = this.marqueeBounds()!;
+          this.selected = new Set([
+            ...(marquee.additive ? marquee.initial : []),
+            ...enclosedNodes(this.board, area),
+          ]);
+          this.renderTree();
+          this.renderInspector();
+          this.renderSelection();
+          return;
+        }
         if (this.pan) {
           if (event.pointerId !== this.pan.pointerId) return;
           if (!this.pan.active) {
@@ -302,6 +436,8 @@ export class Studio {
         type,
         (event) => {
           if (this.pan?.pointerId === (event as PointerEvent).pointerId) this.finishPan();
+          if (this.marquee?.pointerId === (event as PointerEvent).pointerId)
+            this.finishMarquee(type !== 'pointerup');
         },
         { signal }
       );
@@ -309,6 +445,7 @@ export class Studio {
       'pointerleave',
       () => {
         if (this.pan && !this.pan.active) this.finishPan();
+        if (this.marquee && !this.marquee.active) this.finishMarquee();
         this.renderSelection();
       },
       { signal }
@@ -328,6 +465,8 @@ export class Studio {
       () => {
         this.space = false;
         this.finishPan();
+        this.finishMarquee(true);
+        this.hideCanvasMenu();
       },
       { signal }
     );
@@ -371,11 +510,19 @@ export class Studio {
     window.addEventListener(
       'message',
       (event) => {
+        if (event.source !== this.el<HTMLIFrameElement>('iframe').contentWindow) return;
         if (
-          event.source !== this.el<HTMLIFrameElement>('iframe').contentWindow ||
-          event.data?.type !== 'xd-preview-navigate'
-        )
+          event.data?.id === this.preview?.id &&
+          this.preview &&
+          ['xv-preview-ready', 'xv-preview-error'].includes(event.data?.type)
+        ) {
+          clearTimeout(this.previewReadyTimer);
+          const message = this.el('#preview-message');
+          message.hidden = event.data.type === 'xv-preview-ready';
+          if (!message.hidden) message.textContent = '互動初始化失敗，請按「重播」重試。';
           return;
+        }
+        if (event.data?.type !== 'xv-preview-navigate') return;
         const entry = Object.entries(this.bundle?.pages ?? {}).find(
           ([, path]) => path === event.data.page
         );
@@ -400,10 +547,55 @@ export class Studio {
     if (pan?.active && viewport.hasPointerCapture(pan.pointerId))
       viewport.releasePointerCapture(pan.pointerId);
   }
+  private canvasNode(node: SVGElement, direct: boolean) {
+    if (!direct) {
+      const group = node.closest<SVGElement>('[data-node-id^="xv-group-"]');
+      if (group) return group.dataset.nodeId!;
+    }
+    return node.dataset.nodeId!;
+  }
+  private hideCanvasMenu() {
+    this.el('#canvas-menu').hidden = true;
+  }
+  private canvasPoint(event: PointerEvent) {
+    const rect = this.el('#canvas-paper').getBoundingClientRect();
+    return {
+      x: (event.clientX - rect.left) / this.zoom,
+      y: (event.clientY - rect.top) / this.zoom,
+    };
+  }
+  private marqueeBounds() {
+    const m = this.marquee;
+    return m
+      ? {
+          x: Math.min(m.x, m.endX),
+          y: Math.min(m.y, m.endY),
+          width: Math.abs(m.endX - m.x),
+          height: Math.abs(m.endY - m.y),
+        }
+      : undefined;
+  }
+  private finishMarquee(cancel = false) {
+    const m = this.marquee,
+      viewport = this.el('#canvas-viewport');
+    this.marquee = undefined;
+    viewport.classList.remove('selecting');
+    if (m?.active) {
+      if (cancel) this.selected = m.initial;
+      if (viewport.hasPointerCapture(m.pointerId)) viewport.releasePointerCapture(m.pointerId);
+      this.renderTree();
+      this.renderInspector();
+      this.renderSelection();
+    }
+  }
   private keydown(event: KeyboardEvent) {
     if (this.el<HTMLDialogElement>('#modal').open) return;
     if ((event.target as Element)?.closest('input,textarea,select,[contenteditable]')) return;
     const mod = event.ctrlKey || event.metaKey;
+    if (event.key === 'Escape' && !this.el('#canvas-menu').hidden) {
+      this.hideCanvasMenu();
+      return;
+    }
     const layer = (event.target as Element)?.closest<HTMLElement>('[data-layer]');
     if (layer && (event.key === 'Enter' || event.code === 'Space')) {
       event.preventDefault();
@@ -422,10 +614,14 @@ export class Studio {
     } else if (mod && event.key.toLowerCase() === 'z') {
       event.preventDefault();
       void this.action(event.shiftKey ? 'redo' : 'undo');
+    } else if (mod && event.key.toLowerCase() === 'g') {
+      event.preventDefault();
+      void this.action(event.shiftKey ? 'ungroup-selection' : 'group-selection');
     } else if (mod && event.key.toLowerCase() === 'a') {
       event.preventDefault();
       void this.action('select-all');
     } else if (event.key === 'Escape') {
+      this.finishMarquee(true);
       this.selected.clear();
       this.renderTree();
       this.renderInspector();
@@ -477,7 +673,7 @@ export class Studio {
       } else if (action === 'save') {
         const saved = await download(
           serializeProject(this.project),
-          filename(this.project.document.name) + '.xdlocal',
+          filename(this.project.document.name) + '.xv',
           'application/json'
         );
         if (saved) this.toast('已儲存工作檔，含原始圖層、素材及互動設定');
@@ -510,7 +706,29 @@ export class Studio {
         this.renderTree();
         this.renderSelection();
         this.renderInspector();
+      } else if (action === 'open-board' && target?.dataset.id) {
+        this.mode = 'design';
+        this.changeBoard(target.dataset.id);
+      } else if (action === 'group-selection' || action === 'ungroup-selection') {
+        const next = {
+          ...this.project,
+          interactions: { ...this.project.interactions },
+          layouts: { ...this.project.layouts },
+        };
+        const ids =
+          action === 'group-selection'
+            ? [groupSelection(next, this.boardId, this.selected)]
+            : ungroupSelection(next, this.boardId, this.selected);
+        this.history.push(this.project);
+        this.project = next;
+        this.selected = new Set(ids);
+        this.hideCanvasMenu();
+        this.renderAll();
+        this.afterEdit();
       } else if (action === 'design' || action === 'preview' || action === 'overview') {
+        this.finishPan();
+        this.finishMarquee(true);
+        this.hideCanvasMenu();
         this.mode = action;
         this.renderMode();
       } else if (action === 'zoom-in') this.setZoom(this.zoom * 1.2);
@@ -525,6 +743,8 @@ export class Studio {
         this.toast('色碼已複製');
       } else if (action === 'undo' || action === 'redo') {
         this.history[action](this.project);
+        this.selected = new Set([...this.selected].filter((id) => findNode(this.project, id)));
+        this.renderAll();
         this.afterEdit();
         this.renderInspector();
       } else if (action === 'remove-interactions' && this.current) {
@@ -541,8 +761,14 @@ export class Studio {
       else if (action === 'diagnostics') this.diagnostics();
       else if (action === 'help') this.help();
       else if (action === 'close') this.el<HTMLDialogElement>('#modal').close();
-      else if (action === 'export' || action === 'export-assets') {
+      else if (action === 'context-export') {
+        this.hideCanvasMenu();
+        this.assetScope = 'selection';
+        this.exportTab = 'assets';
+        this.exportDialog();
+      } else if (action === 'export' || action === 'export-assets') {
         this.exportTab = action === 'export' ? 'web' : 'assets';
+        if (action === 'export-assets') this.assetScope = 'selection';
         this.exportDialog();
       } else if (action === 'export-tab-web' || action === 'export-tab-assets') {
         this.exportTab = action === 'export-tab-web' ? 'web' : 'assets';
@@ -560,8 +786,8 @@ export class Studio {
       if (file.size > 128 * 1024 * 1024) throw new Error('檔案超過 128 MB 上限。');
       let project: Project;
       if (/\.xd$/i.test(file.name)) project = createProject(await importXd(file));
-      else if (/\.(xdlocal|json)$/i.test(file.name)) project = parseProject(await file.text());
-      else throw new Error('請選擇 .xd 或 .xdlocal 工作檔。');
+      else if (/\.(xv|xdlocal|json)$/i.test(file.name)) project = parseProject(await file.text());
+      else throw new Error('請選擇 .xd 或 .xv 工作檔。');
       if (version !== this.generation) return;
       this.setProject(project);
       this.toast(
@@ -613,6 +839,10 @@ export class Studio {
       .catch((error) => this.toast(error.message, true));
   }
   private changeBoard(id: string) {
+    if (!this.project.document.artboards.some((board) => board.id === id)) return;
+    this.finishPan();
+    this.finishMarquee(true);
+    this.hideCanvasMenu();
     this.boardId = id;
     this.selected = new Set([id]);
     this.renderAll();
@@ -764,8 +994,11 @@ export class Studio {
         `間距 ↔ ${round(gap.horizontal)} px   ↕ ${round(gap.vertical)} px  ·  位置差 ${round(gap.deltaX)}, ${round(gap.deltaY)}`;
     } else
       this.el('#canvas-status').textContent = this.selected.size
-        ? `已選取 ${this.selected.size} 個圖層 · 左鍵拖曳畫板 · Ctrl／⌘ 多選`
-        : '左鍵拖曳畫板 · Ctrl／⌘ 多選 · Alt 測距';
+        ? `已選取 ${this.selected.size} 個圖層 · 左鍵框選 · Shift 多選 · 空白鍵／中鍵拖曳`
+        : '左鍵框選 · Shift 多選 · 空白鍵／中鍵拖曳 · Alt 測距';
+    const marquee = this.marqueeBounds();
+    if (this.marquee?.active && marquee)
+      content += `<rect class="marquee" x="${marquee.x}" y="${marquee.y}" width="${marquee.width}" height="${marquee.height}" fill="#e5a27b22" stroke="#e5a27b" stroke-width="${stroke}"/>`;
     overlay.innerHTML = content;
   }
   private renderInspector() {
@@ -953,6 +1186,7 @@ export class Studio {
       if (field === 'format') this.assetOptions.format = value as AssetOptions['format'];
       else if (field === 'scale') this.assetOptions.scale = Number(value) as 1 | 2 | 3;
       else if (field === 'removeRadius') this.assetOptions.removeRadius = checked;
+      else if (field === 'removeOpacity') this.assetOptions.removeOpacity = checked;
       else if (field === 'merge') {
         this.assetOptions.merge = checked;
         this.exportDialog();
@@ -1049,6 +1283,8 @@ export class Studio {
     }, 400);
   }
   private renderMode() {
+    clearTimeout(this.previewReadyTimer);
+    this.el('#preview-message').hidden = true;
     const preview = this.mode !== 'design';
     this.el('#canvas-viewport').hidden = preview;
     this.el('#preview-stage').hidden = !preview;
@@ -1072,6 +1308,7 @@ export class Studio {
     }
   }
   private renderPreview() {
+    clearTimeout(this.previewReadyTimer);
     try {
       this.preview?.dispose();
       const frame = this.el<HTMLIFrameElement>('iframe');
@@ -1079,21 +1316,29 @@ export class Studio {
       frame.hidden = overview;
       this.el('#overview-boards').hidden = !overview;
       if (overview) {
+        this.el('#preview-message').hidden = true;
         this.preview = undefined;
         frame.srcdoc = '';
         frame.removeAttribute('src');
         this.renderOverview();
-        this.el('#canvas-status').textContent = '全畫板單頁預覽 · 顯示所有完整畫板';
+        this.el('#canvas-status').textContent = '全畫板縮圖 · 點選縮圖開啟畫板';
         return;
       }
       this.bundle = exportWeb(this.project, this.webOptions);
       this.preview = createPreview(this.bundle, this.boardId);
-      frame.removeAttribute('src');
-      frame.srcdoc = this.preview.html;
+      // srcdoc wins over src even when it is an empty string.
+      frame.removeAttribute('srcdoc');
+      frame.src = this.preview.url;
+      const message = this.el('#preview-message');
+      message.hidden = false;
+      message.textContent = '正在載入互動預覽…';
+      this.previewReadyTimer = setTimeout(() => {
+        message.textContent = '預覽尚未完成載入，請按「重播」重試，或切回「檢視」查看畫板。';
+      }, 8000);
       this.resizePreview();
       this.el('#canvas-status').textContent =
         this.mode === 'overview'
-          ? '全畫板單頁預覽 · 顯示所有完整畫板'
+          ? '全畫板縮圖 · 點選縮圖開啟畫板'
           : '互動預覽 · 修改右側設定即可更新';
     } catch (error) {
       this.toast('預覽失敗：' + (error instanceof Error ? error.message : String(error)), true);
@@ -1108,7 +1353,7 @@ export class Studio {
     host.innerHTML = doc.artboards
       .map(
         (board, index) =>
-          `<article class="overview-board"><h2>${esc(board.name)}<small>${board.bounds.width} × ${board.bounds.height}</small></h2><div class="overview-artwork" data-board-index="${index}" style="aspect-ratio:${Math.max(1, board.bounds.width)} / ${Math.max(1, board.bounds.height)}" aria-busy="true"></div></article>`
+          `<button type="button" class="overview-board" data-action="open-board" data-id="${esc(board.id)}" title="開啟 ${esc(board.name)}"><span class="overview-heading">${esc(board.name)}<small>${board.bounds.width} × ${board.bounds.height}</small></span><span class="overview-artwork" data-board-index="${index}" aria-busy="true"></span></button>`
       )
       .join('');
     const mount = (element: HTMLElement) => {
@@ -1200,7 +1445,7 @@ export class Studio {
         '從設計稿，到可維護的網頁',
         '完全本機 · 無雲端上傳 · 無 Adobe XD 執行依賴'
       ) +
-        `<div class="modal-body help-content"><ol><li><strong>開啟 .xd</strong><p>拖入本機 XD 檔。解析後可切換畫板，並查看相容性提醒。</p></li><li><strong>檢查與量測</strong><p>點選圖層；Ctrl／⌘ 或 Shift 多選，選兩個元素量測間距。Alt 懸停可臨時比較；按住滑鼠左鍵拖曳即可捲動畫板，亦支援空白鍵或中鍵拖曳。</p></li><li><strong>互動與響應式</strong><p>右側設定 Click、Hover、Scroll、Sticky、Fixed、Animation。排版面板指定 Flex、Grid 與約束，再在互動預覽切換裝置。</p></li><li><strong>匯出與保存</strong><p>匯出 PNG／SVG 支援去除圓角；多選後可勾選「合併成單一素材」保留相對位置，或個別打包 ZIP。網頁匯出包含 HTML、CSS、JS 與素材，可直接本機開啟。工作檔使用 .xdlocal，不覆寫原始 XD。</p></li></ol><div class="shortcut-grid"><span>Ctrl / ⌘ + O</span><span>開啟</span><span>Ctrl / ⌘ + S</span><span>儲存工作檔</span><span>Ctrl / ⌘ + Z</span><span>復原設定</span><span>+ / − / 0 / F</span><span>縮放 / 100% / 符合視窗</span></div><p class="hint">本機字型缺失會影響外觀。定位式文字框為估算值；SVG 保留原始文字基線。去圓角無法補回已烘焙進點陣圖的透明像素。</p>${button('demo', '載入範例文件', 'layers', 'secondary full-width')}<p class="hint">載入範例會替換目前工作階段；可先儲存 .xdlocal。</p></div>`
+        `<div class="modal-body help-content"><ol><li><strong>開啟 .xd</strong><p>拖入本機 XD 檔。解析後可切換畫板，並查看相容性提醒。</p></li><li><strong>檢查與量測</strong><p>點選圖層；Ctrl／⌘ 或 Shift 多選，選兩個元素量測間距。Alt 懸停可臨時比較；左鍵拖曳可框選多個物件，Shift 可追加選取；空白鍵或中鍵拖曳可捲動畫板。右鍵可組合、解散群組或匯出素材，Ctrl／⌘+G 組合、Ctrl／⌘+Shift+G 解散。</p></li><li><strong>互動與響應式</strong><p>右側設定 Click、Hover、Scroll、Sticky、Fixed、Animation。排版面板指定 Flex、Grid 與約束，再在互動預覽切換裝置。</p></li><li><strong>匯出與保存</strong><p>匯出 PNG／SVG 支援去除圓角；多選後可勾選「合併成單一素材」保留相對位置，或個別打包 ZIP。網頁匯出包含 HTML、CSS、JS 與素材，可直接本機開啟。工作檔使用 .xdlocal，不覆寫原始 XD。</p></li></ol><div class="shortcut-grid"><span>Ctrl / ⌘ + O</span><span>開啟</span><span>Ctrl / ⌘ + S</span><span>儲存工作檔</span><span>Ctrl / ⌘ + Z</span><span>復原設定</span><span>+ / − / 0 / F</span><span>縮放 / 100% / 符合視窗</span></div><p class="hint">本機字型缺失會影響外觀。定位式文字框為估算值；SVG 保留原始文字基線。去圓角無法補回已烘焙進點陣圖的透明像素。</p>${button('demo', '載入範例文件', 'layers', 'secondary full-width')}<p class="hint">載入範例會替換目前工作階段；可先儲存 .xdlocal。</p></div>`
     );
   }
   private exportDialog() {
@@ -1235,7 +1480,7 @@ export class Studio {
                 ['1', '1× 原始尺寸'],
                 ['2', '2× 高解析度'],
                 ['3', '3× 高解析度'],
-              ])}<label class="checkbox-field"><input data-field="export.removeRadius" type="checkbox" ${this.assetOptions.removeRadius ? 'checked' : ''}/>移除矩形與遮罩的圓角</label><p class="hint">包含群組內的圓角。已烘焙進圖片本身的圓角無法還原。SVG 保留可編輯文字，開啟時需要原字型。</p>`
+              ])}<label class="checkbox-field"><input data-field="export.removeRadius" type="checkbox" ${this.assetOptions.removeRadius ? 'checked' : ''}/>移除矩形與遮罩的圓角</label><label class="checkbox-field"><input data-field="export.removeOpacity" type="checkbox" ${this.assetOptions.removeOpacity ? 'checked' : ''}/>移除圖層透明度（不透明度設為 100%）</label><p class="hint">預設保留原稿透明度；此選項不改變圖片像素、填色或陰影本身的透明色。</p><p class="hint">包含群組內的圓角。已烘焙進圖片本身的圓角無法還原。SVG 保留可編輯文字，開啟時需要原字型。</p>`
         }</div><div class="modal-footer"><span>所有處理都在本機完成</span>${button('download-export', web ? (this.exportMode === 'overview' ? '匯出全畫板 HTML' : this.exportMode === 'viewer' ? '匯出 HTML 檢視' : '匯出程式碼 ZIP') : '匯出素材', 'export', 'primary', !web && this.assetScope === 'selection' && !this.selected.size ? 'disabled' : '')}</div>`
     );
   }
@@ -1308,12 +1553,14 @@ export class Studio {
   destroy() {
     this.overviewObserver?.disconnect();
     this.finishPan();
+    this.finishMarquee(true);
     this.unsubscribeMenu?.();
     this.fontRegistry.clear();
     this.abort.abort();
     this.preview?.dispose();
     clearTimeout(this.saveTimer);
     clearTimeout(this.previewTimer);
+    clearTimeout(this.previewReadyTimer);
     clearTimeout(this.toastTimer);
     this.root.innerHTML = '';
   }

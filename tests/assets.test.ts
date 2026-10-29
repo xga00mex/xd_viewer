@@ -40,6 +40,26 @@ function mergeFixture() {
 }
 
 describe('asset batches and visual extents', () => {
+  it('removes nested layer opacity only when requested for individual and merged exports', async () => {
+    const { doc, red, blue, group } = mergeFixture();
+    red.style.opacity = 0.25;
+    const original = JSON.stringify(doc);
+    for (const nodes of [[group], [red, blue]]) {
+      const result = await exportAssets(doc, nodes, {
+        format: 'svg',
+        scale: 1,
+        removeRadius: false,
+        removeOpacity: true,
+        merge: true,
+      });
+      const { data } = await sharp(Buffer.from(result.bytes))
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      expect([...data.subarray(0, 4)]).toEqual([255, 0, 0, 255]);
+    }
+    expect(JSON.stringify(doc)).toBe(original);
+  });
   it('merges selected layers into one SVG with world positions, stacking, rotation and ancestor opacity', async () => {
     const { doc, red, blue } = mergeFixture();
     const source = JSON.stringify(doc);

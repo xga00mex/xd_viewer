@@ -7,3 +7,9 @@ coverage/
 .codex-attachments/
 *.log
 .DS_Store
+
+# User design references and workspaces remain local.
+*.xd
+!tests/fixtures/xd2svg/single.xd
+*.xdlocal
+*.xv

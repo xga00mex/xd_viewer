@@ -65,6 +65,6 @@ server.on('error', (error) => {
 });
 server.listen(port, '127.0.0.1', () =>
   console.log(
-    `XD Local 已啟動：http://127.0.0.1:${port}\n所有設計檔案僅在瀏覽器本機處理。按 Ctrl+C 關閉服務。`
+    `XV 已啟動：http://127.0.0.1:${port}\n所有設計檔案僅在瀏覽器本機處理。按 Ctrl+C 關閉服務。`
   )
 );

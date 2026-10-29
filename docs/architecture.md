@@ -19,21 +19,21 @@
 
 ## 邊界與防護
 
-- `parser/xd.ts` 是唯一允許動態 AGC wire shape 的區域。新增格式支援應在 adapter 正規化，不能把 raw AGC 欄位散落到 UI。
+- `parser/design.ts` 是唯一允許動態 AGC wire shape 的區域。新增格式支援應在 adapter 正規化，不能把 raw AGC 欄位散落到 UI。
 - 元件來源先索引 shared symbols（包括 `resources.meta.ux.symbols`）、狀態及複合圖形的編輯子圖層，再索引畫板。`syncSourceGuid` 以來源 ID 展開，`guid` 作為實例 ID；物件欄位遞迴繼承，陣列使用已儲存的實例內容。保留循環／深度／數量限制。複合圖形僅繪製已保存的結果路徑，編輯用 operands 不另行繪製。
 - 封裝先檢查數量、大小與路徑；只讀 ZIP 內的資源，不存取 pattern.href 的外部網址或本機路徑。
 - 圖片以封裝內完整資源路徑作為 ID，UID／manifest ID／檔名為別名。只在別名唯一時解析；優先 UID，失效時可改查 href 對應的封裝資源。所有來源仍限於已解壓的封裝內容。
 - 工作檔透過 Zod 驗證，限定數值、列舉、顏色與內嵌點陣圖格式；禁止任意 HTML、JS、CSS 與外部 URL。
 - 圖層名稱、文字與屬性均使用對應的 HTML/XML/CSS escaping；輸出類別固定加英文字首，不能讓數字開頭的圖層名變成無效 selector。
 - 互動只接受預先定義的行為，沒有自訂程式碼輸入。預覽 iframe 僅允許 scripts，沒有 same-origin；父層僅接受目前 iframe 發出的已知畫板導覽訊息。
-- 桌面版透過受限 IPC 將工作檔原子寫入使用者資料目錄；瀏覽器開發模式才使用 IndexedDB。50 步 undo/redo 僅保存設定，不重複複製大型內嵌圖像。
+- 桌面版透過受限 IPC 將工作檔原子寫入使用者資料目錄；瀏覽器開發模式才使用 IndexedDB。50 步 undo/redo 保存設定與不可變畫板樹參照，不重複複製大型內嵌圖像。
 - 可選的 `DesignDocument.fonts` 保存使用者載入的字型。FontRegistry 管理字型載入與文件切換時的釋放；內附 Noto Sans TC 100–900 WOFF2 作為離線備援，原稿字型保持第一順位。透過跨 generic 字型的字寬比較偵測缺字型，通知與相容性報告列出名稱；HTML 輸出字型只打包一次，獨立 SVG 僅嵌入其文字使用的字型。字型載入／移除是文件資源操作，不列入互動設定的 undo/redo。
 
 元件定義索引上限為 200,000，展開場景仍限制為 50,000 圖層。`interactions/interactions.json` 與節點的 interaction GUID 對應已儲存的雙狀態 tap 切換，`component` 保存備選節點，`stateTarget` 保存觸發目標；多狀態／Hover／Auto-Animate 不猜測近似效果。工作檔 schema 驗證備選節點的深度、數量與 ID，舊工作檔無須遷移。
 
 `fixed` 保留原稿的捲動行為，不能改變圖層順序。固定背景與固定控制項都按原稿順序繪製；HTML 匯出不為原稿 fixed 圖層強制指定 z-index。HTML 輸出僅在固定祖先之外套用 fixed，避免 nested fixed 重複定位。離線 HTML 總覽將固定圖層轉為各板內 absolute。
 
-工作台的全畫板模式直接在主文件建立畫板卡片及共用 SVG，使用全域 FontRegistry，不使用 iframe、srcdoc 或互動頁面腳本。IntersectionObserver 以總覽捲動容器為 root，提前 400px 載入 SVG，離開模式或銷毀工作台時釋放 observer 與 DOM；缺少該 API 時直接顯示所有畫板。
+工作台的全畫板模式直接在主文件建立等尺寸、可點選的畫板縮圖卡片及共用 SVG，使用全域 FontRegistry，不使用 iframe、srcdoc 或互動頁面腳本。IntersectionObserver 以總覽捲動容器為 root，提前 400px 載入 SVG，離開模式或銷毀工作台時釋放 observer 與 DOM；缺少該 API 時直接顯示所有畫板。
 
 ## 渲染與輸出
 
@@ -43,11 +43,11 @@
 
 HTML 匯出以原生節點、獨立 stylesheet 與資源目錄為主。矩形保留 CSS、向量與定位文字保留 SVG、流式文字使用 HTML。剪裁群組用零尺寸 SVG 定義 clipPath，再套到 HTML 容器，保留子元素的互動與語意。
 
-預覽使用 `exportWeb` 的同一組輸出，將圖片、字型與 CSS 內嵌為 iframe srcdoc；互動腳本由 Vite 的獨立 preview-entry 產物透過 app URL 載入，不在 opaque-origin 沙箱中讀取 Blob 子資源。只允許 scripts，維持父層 DOM 與 IPC 隔離。`interactionRuntime` 必須保持獨立函式，所有依賴都放在函式內，因為它會序列化為匯出的獨立 JS。
+預覽使用 `exportWeb` 的同一組輸出，將圖片、字型與 CSS 內嵌為 Blob HTML，再讓 iframe 導覽至該文件；互動腳本由 Vite 的獨立 preview-entry 產物透過 app URL 載入，不在 opaque-origin 沙箱中讀取 Blob 子資源；切換前釋放舊 URL，且移除 srcdoc 屬性，避免空 srcdoc 覆蓋 src。預覽 runtime 以識別碼回報就緒，父頁只接受目前 iframe 與目前預覽的訊息。只允許 scripts，維持父層 DOM 與 IPC 隔離。`interactionRuntime` 必須保持獨立函式，所有依賴都放在函式內，因為它會序列化為匯出的獨立 JS。
 
 ## Windows 桌面與 HTML 檢視
 
-Electron 主程式載入封裝內的 `xd-local://app/index.html`，不提供 localhost HTTP 服務。renderer 採 `sandbox`、`contextIsolation`，停用 Node 整合；preload 只公開開啟選檔、儲存檔案、工作階段讀寫及選單事件。每次 IPC 驗證來源必須是主視窗的主 frame 及固定 app URL，沙箱預覽不能存取桌面檔案。網路 HTTP(S)／WebSocket、外部導覽與新視窗預設拒絕。
+Electron 主程式載入封裝內的 `xv://app/index.html`，不提供 localhost HTTP 服務。renderer 採 `sandbox`、`contextIsolation`，停用 Node 整合；preload 只公開開啟選檔、儲存檔案、工作階段讀寫及選單事件。每次 IPC 驗證來源必須是主視窗的主 frame 及固定 app URL，沙箱預覽不能存取桌面檔案。網路 HTTP(S)／WebSocket、外部導覽與新視窗預設拒絕。
 
 工作階段由主程式序列寫入暫存檔後原子更名。關閉視窗時先要求 renderer 提交尚未完成的變更，成功才結束；存檔失敗留在視窗並顯示錯誤。
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import sharp from 'sharp';
-import { parseXd } from '../src/parser/xd';
+import { parseXd } from '../src/parser/design';
 import { zipSync, strToU8 } from 'fflate';
 import { renderAsset, renderBoard } from '../src/render/svg';
 import { createProject } from '../src/core/model';

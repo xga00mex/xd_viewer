@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 const dev = process.argv.includes('--development');
 const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const exe = path.resolve(
-  dev ? 'node_modules/electron/dist/electron.exe' : `release/XD-Local-${version}-Windows-x64.exe`
+  dev ? 'node_modules/electron/dist/electron.exe' : `release/XV-${version}-Windows-x64.exe`
 );
 const report = path.resolve(
   dev ? '.cache/desktop/development-verification.json' : 'release/desktop-verification.json'

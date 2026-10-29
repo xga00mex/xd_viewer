@@ -8,6 +8,7 @@ export interface AssetOptions {
   format: 'svg' | 'png';
   scale: 1 | 2 | 3;
   removeRadius: boolean;
+  removeOpacity?: boolean;
   merge?: boolean;
 }
 export async function svgToPng(svg: string, scale = 1): Promise<Uint8Array> {
@@ -43,7 +44,7 @@ export async function exportAssets(
 ): Promise<{ name: string; bytes: Uint8Array; mime: string }> {
   if (!nodes.length) throw new Error('請先選取至少一個圖層。');
   if (options.merge && nodes.length > 1) {
-    const svg = renderMergedAsset(doc, nodes, { removeRadius: options.removeRadius });
+    const svg = renderMergedAsset(doc, nodes, options);
     const bytes = options.format === 'svg' ? strToU8(svg) : await svgToPng(svg, options.scale);
     if (bytes.byteLength > 256 * 1024 * 1024) throw new Error('匯出素材超過 256 MB，請分批匯出。');
     return {
@@ -55,7 +56,7 @@ export async function exportAssets(
   const files: Record<string, Uint8Array> = {};
   let total = 0;
   for (const node of nodes) {
-    const svg = renderAsset(doc, node, { removeRadius: options.removeRadius });
+    const svg = renderAsset(doc, node, options);
     const data = options.format === 'svg' ? strToU8(svg) : await svgToPng(svg, options.scale);
     total += data.byteLength;
     if (total > 256 * 1024 * 1024) throw new Error('匯出素材超過 256 MB，請分批匯出。');
