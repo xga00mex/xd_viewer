@@ -2,13 +2,13 @@
 
 Windows EXE 桌面版的 Adobe XD 設計稿檢視／切版工具。使用 TypeScript、Electron 與原生 DOM，提供繁體中文三欄介面。雙擊 EXE 就能工作，不需要瀏覽器、localhost 服務、Node.js 或 Adobe XD；檔案在本機解析，不上傳雲端。只有匯出的 HTML 檢視器需要用瀏覽器開啟；匯出結果不依賴 React、Vue、jQuery、npm 或 CDN。
 
-目前原始碼版本 **0.3.0**，產品名稱與圖示改為 **XV**。這個版本加入等尺寸畫板縮圖、畫布框選、右鍵群組與透明度匯出選項，並修正預覽初始化；尚未打包或發布。
+目前版本 **XV 0.3.0**。這個版本加入等尺寸畫板縮圖、畫布框選、右鍵群組與透明度匯出選項，並修正預覽初始化。產品名稱、圖示與新輸出檔名統一為 XV。
 
 ## 啟動
 
-待核准發布後，可從 [Releases](https://github.com/xga00mex/xv/releases) 下載 Windows 可攜式程式。
+從 [XV 0.3.0 Release](https://github.com/xga00mex/xv/releases/tag/v0.3.0) 下載 `XV-0.3.0-Windows-x64.exe`；同頁提供 SHA-256 校驗碼、離線示範及驗證紀錄。
 
-新版本預計使用 `release/XV-0.3.0-Windows-x64.exe` 與 `Start-XV.cmd`。支援 Windows 10／11 x64，執行時不需另裝 Node.js 或 Adobe XD。
+直接執行 `release/XV-0.3.0-Windows-x64.exe` 或 `Start-XV.cmd`。支援 Windows 10／11 x64，執行時不需另裝 Node.js 或 Adobe XD。版本化封裝與附件另存於 `release/v0.3.0/`。
 
 原始碼開發才需要 Node.js 22.12 以上（本次為 24.19）。首次下載開發與封裝套件需要網路，建置完成後可離線運作。
 
@@ -105,4 +105,4 @@ scripts/       正式版驗證、封裝圖示與開發診斷
 tests/         格式、像素、匯出與 DOM 整合測試
 ```
 
-技術選型與第一方來源見 [XD 格式研究](docs/design-format-research.md)，架構與擴充規則見 [架構說明](docs/architecture.md)，本次修正與驗證見 [v0.3.0 草案](docs/releases/v0.3.0.md)。測試 XD 檔的來源與授權保留於 [fixture 說明](tests/fixtures/xd2svg/README.md)。
+技術選型與第一方來源見 [XD 格式研究](docs/design-format-research.md)，架構與擴充規則見 [架構說明](docs/architecture.md)，本次修正與驗證見 [v0.3.0 紀錄](docs/releases/v0.3.0.md)。測試 XD 檔的來源與授權保留於 [fixture 說明](tests/fixtures/xd2svg/README.md)。

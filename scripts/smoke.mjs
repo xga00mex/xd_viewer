@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
+import path from 'node:path';
 import { Window } from 'happy-dom';
 
 const window = new Window({
   url: 'http://127.0.0.1:4173',
   settings: { handleDisabledFileLoadingAsSuccess: true },
 });
+const releaseDirectory = path.resolve(process.env.XV_RELEASE_DIR || 'release');
 window.document.body.innerHTML = '<div id="app"></div>';
 for (const key of [
   'window',
@@ -140,8 +142,8 @@ try {
   const saved = await saveResult;
   assert(saved.name.endsWith('.html'), 'Default export is a single review HTML');
   const html = new TextDecoder().decode(saved.bytes);
-  await mkdir(new URL('../release/', import.meta.url), { recursive: true });
-  await writeFile(new URL('../release/Demo-Review.html', import.meta.url), html);
+  await mkdir(releaseDirectory, { recursive: true });
+  await writeFile(path.join(releaseDirectory, 'Demo-Review.html'), html);
   const review = new Window();
   review.document.body.innerHTML = html.match(/<body>([\s\S]*)<\/body>/)[1];
   const reviewScript = [...review.document.scripts].find(
@@ -168,6 +170,24 @@ try {
   });
   page.document.querySelector('button').click();
   assert.equal(navigation.page, 'page-next.html', 'Minified review bridge is self-contained');
+  const overviewResult = new Promise((resolve) => {
+    completeSave = resolve;
+  });
+  root.querySelector('[data-action="export"]').click();
+  const exportMode = root.querySelector('[data-field="export.mode"]');
+  exportMode.value = 'overview';
+  exportMode.dispatchEvent(new window.Event('change', { bubbles: true }));
+  root.querySelector('[data-action="download-export"]').click();
+  const overview = new TextDecoder().decode((await overviewResult).bytes);
+  assert(
+    overview.includes('class="overview-card"'),
+    'Built overview export contains the demo artboard'
+  );
+  assert(
+    !/(?:src|href)="(?:assets\/|styles.css|interactions.js)/.test(overview),
+    'Overview export is self-contained'
+  );
+  await writeFile(path.join(releaseDirectory, 'Demo-All-Artboards.html'), overview);
   // A settings edit immediately followed by closing must flush the debounce first.
   root.querySelector('[data-field="hover.duration"]').value = '320';
   root

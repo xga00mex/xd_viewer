@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.3.0",
   "type": "module",
-  "description": "完全本機的 Adobe XD 切版工作台",
+  "description": "XV — 本機設計稿檢視與素材匯出工具",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",

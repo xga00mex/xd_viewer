@@ -35,13 +35,18 @@ const files = execFileSync('git', ['ls-files', '-co', '--exclude-standard', '-z'
   .toString()
   .split('\0')
   .filter(Boolean);
+// Optional generated text artifacts can be audited without adding them to Git.
+files.push(...process.argv.slice(2));
 const hits = [];
 for (const file of new Set(files)) {
   if (!existsSync(file) || file.startsWith('tests/fixtures/')) continue;
   const bytes = readFileSync(file),
     source = bytes.includes(0) ? '' : bytes.toString('utf8');
-  const texts = [...text].filter((value) => source.includes(value));
-  const identifiers = [...ids].filter((value) => source.includes(value));
+  // Embedded font/image payloads cannot contain literal source text. Their image
+  // prefixes and binary hashes are still checked against the untouched source.
+  const literalSource = source.replace(/data:(?:font|image)\/[\w.+-]+;base64,[A-Za-z0-9+/=]+/g, '');
+  const texts = [...text].filter((value) => literalSource.includes(value));
+  const identifiers = [...ids].filter((value) => literalSource.includes(value));
   const embedded = imagePrefixes.some((prefix) => source.includes(prefix));
   if (texts.length || identifiers.length || embedded || imageHashes.has(hash(bytes)))
     hits.push({

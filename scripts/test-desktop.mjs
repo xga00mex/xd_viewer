@@ -4,12 +4,17 @@ import { readFile, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const dev = process.argv.includes('--development');
+const releaseDirectory = path.resolve(process.env.XV_RELEASE_DIR || 'release');
 const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const exe = path.resolve(
-  dev ? 'node_modules/electron/dist/electron.exe' : `release/XV-${version}-Windows-x64.exe`
+  dev
+    ? 'node_modules/electron/dist/electron.exe'
+    : path.join(releaseDirectory, `XV-${version}-Windows-x64.exe`)
 );
 const report = path.resolve(
-  dev ? '.cache/desktop/development-verification.json' : 'release/desktop-verification.json'
+  dev
+    ? '.cache/desktop/development-verification.json'
+    : path.join(releaseDirectory, 'desktop-verification.json')
 );
 await mkdir(path.dirname(report), { recursive: true });
 await rm(report, { force: true });
